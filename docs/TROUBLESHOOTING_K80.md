@@ -1,0 +1,209 @@
+# TROUBLESHOOTING_K80
+
+## Zweck und Scope
+
+Dieses Dokument beschreibt typische Probleme beim LoRA/Fine-Tuning auf **NVIDIA Tesla K80** in der lokalen Container-Umgebung und liefert reproduzierbare Prüf- und Gegenmaßnahmen.
+
+Zielpriorität:
+
+1. **Stabiler Lauf**
+2. **Reproduzierbarkeit**
+3. **Durchsatzoptimierung**
+
+---
+
+## 1) Typische Hardware-/Runtime-Limits der K80
+
+Die K80 ist eine ältere GPU-Generation (Kepler) mit klaren Grenzen für modernes LLM-Training.
+
+### 1.1 VRAM-Limit / Out-of-Memory (OOM)
+
+**Symptome**
+- `CUDA out of memory`
+- Prozessabbruch beim Laden des Modells
+- Abbruch beim ersten Backward-Pass
+
+**Häufige Ursachen**
+- Zu große `max_seq_length`
+- Zu hohe `per_device_train_batch_size`
+- Zu große LoRA-Konfiguration (`r`, mehr Target-Module)
+- Zu viele parallele Worker/Prefetches
+
+**Sofortmaßnahmen (Reihenfolge)**
+1. `per_device_train_batch_size = 1`
+2. `gradient_accumulation_steps` erhöhen (z. B. 16, 32)
+3. `max_seq_length` reduzieren (512 → 384 → 256)
+4. `gradient_checkpointing = true`
+5. LoRA-Rank reduzieren (`r: 8` statt `16`)
+6. Nur notwendige `target_modules` aktiv lassen
+
+---
+
+### 1.2 Langsame Trainingsschritte
+
+**Symptome**
+- Sehr hohe `seconds/step`
+- GPU-Auslastung niedrig oder stark schwankend
+
+**Häufige Ursachen**
+- CPU/Data-Loader bottleneck
+- Zu häufiges Logging/Speichern
+- Sehr kleine Batch + hoher Overhead pro Step
+- Ältere Architektur mit begrenzter Rechenleistung
+
+**Mitigations**
+- `dataloader_num_workers` moderat halten (z. B. 2)
+- `logging_steps` erhöhen (weniger häufig loggen)
+- `save_steps` erhöhen (weniger häufig checkpointen)
+- Datensatz vorab bereinigen/normalisieren, I/O minimieren
+- Erst Stabilität sichern, danach Performance-Tuning
+
+---
+
+### 1.3 Precision-/Numerik-Probleme (fp16/bf16)
+
+**Symptome**
+- `nan`/`inf` im Loss
+- Instabile Lernkurve
+- Lauf bricht bei Mixed Precision ab
+
+**Wichtig**
+- K80 unterstützt in der Praxis typischerweise **fp16**, aber **bf16** nicht sinnvoll nutzbar.
+
+**Mitigations**
+- `bf16 = false`
+- `fp16 = true` (nur wenn stabil)
+- Lernrate senken (z. B. `2e-4` → `1e-4`)
+- `max_grad_norm = 1.0` beibehalten
+- Bei hartnäckiger Instabilität testweise CPU-Validierung kleiner Samples
+
+---
+
+## 2) Konfigurations-Baselines für K80
+
+Empfohlene konservative Startwerte für MVP-LoRA auf ~3B:
+
+- `per_device_train_batch_size: 1`
+- `gradient_accumulation_steps: 16` (oder höher)
+- `max_seq_length: 512` (bei OOM auf 384/256)
+- `fp16: true`
+- `bf16: false`
+- `gradient_checkpointing: true`
+- `evaluation_strategy: "no"` für erste stabile Trainingsläufe
+- `save_steps`: nicht zu klein (z. B. 200+)
+
+---
+
+## 3) Kompatibilität CUDA / PyTorch prüfen
+
+Da K80-Setups stark von Treiber/Runtime abhängen, muss die Kompatibilität explizit verifiziert werden.
+
+### 3.1 Platzhalter-Kompatibilitätsliste (vor produktivem Run konkretisieren)
+
+| Komponente | Erwartungswert (Beispiel) | Status |
+|---|---:|---|
+| NVIDIA Driver (Host) | Muss zur verwendeten CUDA-Runtime passen | Manuell prüfen |
+| CUDA Runtime (Container) | z. B. 11.8 | Manuell prüfen |
+| PyTorch Build | CUDA-kompatibler Build (z. B. cu118) | Manuell prüfen |
+| GPU-Erkennung | K80 sichtbar im Container | Manuell prüfen |
+
+> Diese Liste ist absichtlich als kontrollierter Platzhalter gehalten. Exakte Werte sollen pro Host dokumentiert werden.
+
+### 3.2 Verifikation im Container (empfohlene Checks)
+
+1. **GPU sichtbar?**
+   - `nvidia-smi`
+   - Erwartung: K80 wird gelistet.
+
+2. **CUDA in PyTorch aktiv?**
+   - `python -c "import torch; print(torch.cuda.is_available())"`
+   - Erwartung: `True`
+
+3. **Welche CUDA-Version nutzt PyTorch?**
+   - `python -c "import torch; print(torch.version.cuda)"`
+   - Erwartung: Wert passend zur Build-Konfiguration
+
+4. **Welche GPU erkennt PyTorch?**
+   - `python -c "import torch; print(torch.cuda.get_device_name(0))"`
+   - Erwartung: K80-Name
+
+5. **bf16-Support vorhanden?**
+   - `python -c "import torch; print(torch.cuda.is_bf16_supported())"`
+   - Erwartung auf K80: typischerweise `False`
+
+Wenn einer dieser Checks fehlschlägt, zuerst Treiber/Container-Runtime/PyTorch-Build ausrichten, bevor Trainingsparameter angepasst werden.
+
+---
+
+## 4) Fehlerbilder und deterministische Reaktion
+
+| Fehlerfall | Detektion | Reaktion | Nutzerinfo |
+|---|---|---|---|
+| CUDA OOM beim Start | Exception beim Model Load | `max_seq_length` senken, Batch=1, ggf. kleineres Base-Modell | „Modell passt nicht in VRAM; Konfigurationsreduktion notwendig.“ |
+| CUDA OOM während Backward | Exception im Training Step | `gradient_accumulation_steps` erhöhen, Checkpointing an, LoRA-Rank senken | „Speicherverbrauch pro Step zu hoch; mikro-batching angepasst.“ |
+| GPU nicht sichtbar | `nvidia-smi` leer/Fehler | Container-GPU-Passthrough prüfen, Host-Treiber prüfen | „GPU im Container nicht verfügbar; Training auf GPU nicht möglich.“ |
+| `torch.cuda.is_available() == False` | Python Check | PyTorch CUDA-Build prüfen, Container Image prüfen | „CUDA in PyTorch nicht aktiv; CPU-Fallback wäre sehr langsam.“ |
+| NaN/Inf Loss | Training Logs | Lernrate senken, Daten prüfen, Precision prüfen | „Numerische Instabilität erkannt; konservative Hyperparameter gesetzt.“ |
+| Sehr langsame Steps | Logs (sec/step), niedrige GPU-Auslastung | Logging/Checkpoint-Intervall erhöhen, Loader optimieren | „Durchsatz limitiert; Overhead reduziert.“ |
+
+---
+
+## 5) Daten- und Prompt-bezogene Ursachen
+
+Nicht jede Instabilität ist hardwarebedingt.
+
+**Prüfen**
+- JSONL sauber (eine Zeile = ein Objekt)
+- Pflichtfelder vorhanden: `instruction`, `output`
+- Extrem lange Samples filtern/clippen
+- Prompt-Template konsistent halten
+
+**Warum relevant**
+- Ausreißer in Textlänge verursachen Speicherpeaks
+- Inkonsistente Daten erhöhen Loss-Varianz und Instabilität
+
+---
+
+## 6) Minimaler Recovery-Plan bei fehlgeschlagenem Run
+
+1. Letzten Lauf als „failed“ markieren (Run-ID behalten, Logs sichern)
+2. Nur **eine** Variable pro Wiederholungsrun ändern
+3. Priorisierte Anpassung:
+   - `max_seq_length` runter
+   - dann `gradient_accumulation_steps` rauf
+   - dann Lernrate runter
+4. Kurzen Smoke-Run mit wenigen Samples fahren
+5. Erst danach vollständigen Lauf starten
+
+Damit bleibt das Tuning nachvollziehbar und auditierbar.
+
+---
+
+## 7) Audit-Checkliste pro Training-Run
+
+Vor jedem Run dokumentieren:
+
+- Run-ID
+- Basis-Modellname
+- Datensatzpfad + optional Hash
+- Relevante Hyperparameter (`batch`, `grad_accum`, `seq_len`, `lr`, `fp16/bf16`)
+- Container-Image/Tag
+- Treiber-/CUDA-/Torch-Infos aus den Verifikationschecks
+
+Nach jedem Run dokumentieren:
+
+- Erfolg/Fehlerstatus
+- Fehlerklasse (OOM, Kompatibilität, Numerik, Daten)
+- Dauer, Steps, letzte Metriken
+- Nächste geplante Parameteränderung
+
+---
+
+## 8) Kurzfassung: empfohlene Standardreaktionen
+
+- **OOM** → erst `seq_len` runter, dann `grad_accum` rauf
+- **Instabiler Loss** → LR runter, `bf16` aus, Daten prüfen
+- **GPU nicht verfügbar** → Runtime/Driver/Passthrough zuerst reparieren
+- **Zu langsam** → Logging/Checkpointing drosseln, konservativ optimieren
+
+Reproduzierbarkeit hat Vorrang vor aggressiver Optimierung.
