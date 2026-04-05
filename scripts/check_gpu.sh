@@ -208,7 +208,7 @@ out = {
     'torch_version': torch.__version__,
     'torch_cuda_version': getattr(torch.version, 'cuda', None),
     'cuda_available': bool(has_cuda),
-    'cuda_device_count': int(torch.cuda.device_count()) if has_cuda else 0,
+    'cuda_device_count': int(torch.cuda.device_count()),
     'bf16_supported': bool(torch.cuda.is_bf16_supported()) if has_cuda else False,
 }
 if has_cuda and torch.cuda.device_count() > 0:
@@ -236,7 +236,8 @@ PY" >/tmp/check_gpu_torch.json 2>/tmp/check_gpu_torch.err; then
   printf '%s\n' "[INFO] Container torch summary: ${TORCH_JSON}"
 
   # Best-effort parse of compute capability from JSON (without jq)
-  CC0="$(printf '%s\n' "$TORCH_JSON" | sed -n 's/.*"compute_capability_0":"\([^"]*\)".*/\1/p' || true)"
+  # Accept both `"compute_capability_0":"3.7"` and `"compute_capability_0": "3.7"` forms.
+  CC0="$(printf '%s\n' "$TORCH_JSON" | sed -n 's/.*"compute_capability_0"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' || true)"
   if [ -n "$CC0" ]; then
     if version_ge "$CC0" "$MIN_CC"; then
       ok "Container device[0] compute capability ${CC0} >= ${MIN_CC}"

@@ -98,6 +98,17 @@ Empfohlene konservative Startwerte für MVP-LoRA auf ~3B:
 
 Da K80-Setups stark von Treiber/Runtime abhängen, muss die Kompatibilität explizit verifiziert werden.
 
+### Betriebsregel: eingefrorene, bekannte stabile GPU-Baseline (verbindlich)
+
+Für dieses Projekt gilt eine feste Betriebsbaseline:
+
+- NVIDIA Driver: `470.256.02`
+- CUDA Runtime (Host, `nvidia-smi`): `11.4`
+- Ziel-GPU: `Tesla K80`
+
+Diese Baseline ist als **stabil freigegeben** und wird **nicht aktualisiert**.  
+Änderungen an Treiber/CUDA sind nur per expliziter Ausnahmefreigabe zulässig, da Stabilität und Reproduzierbarkeit priorisiert sind.
+
 ### 3.1 Platzhalter-Kompatibilitätsliste (vor produktivem Run konkretisieren)
 
 | Komponente | Erwartungswert (Beispiel) | Status |
@@ -121,15 +132,52 @@ Da K80-Setups stark von Treiber/Runtime abhängen, muss die Kompatibilität expl
 
 3. **Welche CUDA-Version nutzt PyTorch?**
    - `python -c "import torch; print(torch.version.cuda)"`
-   - Erwartung: Wert passend zur Build-Konfiguration
+   - Erwartung: Wert passend zur Build-Konfiguration.
 
-4. **Welche GPU erkennt PyTorch?**
+4. **Wie viele CUDA-Devices sieht PyTorch?**
+   - `python -c "import torch; print(torch.cuda.device_count())"`
+   - Erwartung: `>= 1` bei aktiver GPU-Zuordnung.
+
+5. **Welche GPU erkennt PyTorch?**
    - `python -c "import torch; print(torch.cuda.get_device_name(0))"`
-   - Erwartung: K80-Name
+   - Erwartung: K80-Name.
 
-5. **bf16-Support vorhanden?**
+6. **bf16-Support vorhanden?**
    - `python -c "import torch; print(torch.cuda.is_bf16_supported())"`
-   - Erwartung auf K80: typischerweise `False`
+   - Erwartung auf K80: typischerweise `False`.
+
+#### Kompatibilitäts-Fix-Hinweis (wichtig)
+
+Falls `nvidia-smi` im Container funktioniert, aber PyTorch trotzdem `torch.cuda.is_available() == False` meldet, liegt häufig ein **Treiber-/CUDA-Build-Mismatch** vor (CUDA-Initialisierung schlägt fehl, obwohl Geräte sichtbar sind).
+
+Typisches Muster:
+- `nvidia-smi`: GPU sichtbar
+- `torch.cuda.device_count()`: ggf. `>= 1`
+- `torch.cuda.is_available()`: `False`
+- ggf. Fehler wie „No CUDA GPUs are available“ bei CUDA-Kontextinitialisierung
+
+Reaktion:
+1. PyTorch-Build auf zur Host-Baseline passenden CUDA-Build pinnen.
+2. Container-CUDA-Basisimage auf kompatible Version ausrichten.
+3. Erst nach erfolgreicher CUDA-Initialisierung (`is_available() == True`) Trainingsparameter anpassen.
+
+#### Validierter Ist-Stand (2026-04-05)
+
+Nach Anpassung auf den Legacy-kompatiblen Stack wurde der Container-Check erfolgreich verifiziert:
+
+- `nvidia-smi` im Container: **OK**, 2x `Tesla K80` sichtbar
+- `torch_version`: `1.12.1+cu113`
+- `torch_cuda_version`: `11.3`
+- `torch.cuda.is_available()`: `True`
+- `torch.cuda.device_count()`: `1`
+- `torch.cuda.get_device_name(0)`: `Tesla K80`
+- `compute_capability_0`: `3.7`
+- `bf16_supported`: `False` (erwartet auf K80)
+
+Interpretation:
+- Der CUDA-Initialisierungspfad für PyTorch ist funktionsfähig.
+- Damit ist das frühere Mismatch-Symptom (`nvidia-smi` OK, `is_available=False`) für diese Baseline behoben.
+- Ein verbleibender Parser-Warnhinweis zur Compute-Capability-Ausgabe ist nicht als Runtime-Blocker zu werten, solange die obigen Werte erfolgreich gemeldet werden.
 
 Wenn einer dieser Checks fehlschlägt, zuerst Treiber/Container-Runtime/PyTorch-Build ausrichten, bevor Trainingsparameter angepasst werden.
 
@@ -189,6 +237,8 @@ Vor jedem Run dokumentieren:
 - Relevante Hyperparameter (`batch`, `grad_accum`, `seq_len`, `lr`, `fp16/bf16`)
 - Container-Image/Tag
 - Treiber-/CUDA-/Torch-Infos aus den Verifikationschecks
+- Feste GPU-Baseline: Driver `470.256.02`, CUDA Runtime `11.4`
+- Abweichung von der Baseline? (`nein/ja`) inkl. Ausnahmefreigabe-Referenz
 
 Nach jedem Run dokumentieren:
 

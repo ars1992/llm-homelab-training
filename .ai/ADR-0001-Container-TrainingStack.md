@@ -27,13 +27,13 @@ Randbedingungen:
 
 Wir verwenden als Basis:
 
-- `nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04`
+- `nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu22.04`
 
 Begründung:
 
-- CUDA-Stack ist explizit und stabil adressierbar.
-- Gute Kompatibilitätsbasis für PyTorch-CUDA-Wheels (`cu118`).
-- Geeigneter Kompromiss zwischen Aktualität und Legacy-Hardware-Unterstützung (inkl. K80-Realität im Homelab).
+- Die Host-Baseline ist bewusst eingefroren (`NVIDIA Driver 470.256.02`, CUDA Runtime laut `nvidia-smi` `11.4`).
+- Für diese Treiberklasse ist ein `cu113`-Stack reproduzierbar kompatibel; `cu118` führte zu CUDA-Initialisierungsfehlern in PyTorch trotz sichtbarer GPU in `nvidia-smi`.
+- Der gewählte Stand priorisiert Stabilität auf Tesla K80 (Kepler, sm_37) vor Aktualität.
 
 ### 2.2 Python-Dependency-Strategie
 
@@ -44,7 +44,7 @@ Wir verwenden:
 
 Beispielprinzip:
 
-- `torch==<version>+cu118` über offiziellen PyTorch CUDA-Index
+- `torch==1.12.1+cu113` über offiziellen PyTorch CUDA-Index
 - keine unkontrollierten Floating-Versionen (`>=` ohne Obergrenze) für Kernkomponenten
 
 ### 2.3 Compose-Betriebsmodell
@@ -65,6 +65,19 @@ Beispielprinzip:
 Grund: Kompatibilitätsrisiken auf älterer GPU-/Treiberkombination.
 
 ---
+
+### 2.5 Verifizierte Kompatibilitätsentscheidung (K80 / Driver 470)
+
+Im Betrieb wurde folgender Fehler reproduzierbar beobachtet:
+
+- `nvidia-smi` im Container erkennt K80 korrekt,
+- PyTorch mit `2.1.2+cu118` meldet jedoch `torch.cuda.is_available() == False`.
+
+Daraus wurde als verbindliche Entscheidung abgeleitet:
+
+1. Downgrade auf `cu113`-kompatiblen Stack (`torch==1.12.1+cu113`).
+2. Beibehaltung der eingefrorenen Host-Baseline (kein Treiber-/CUDA-Upgrade).
+3. Jede Abweichung nur über Ausnahmefreigabe mit dokumentiertem Rollback-Plan.
 
 ## 3. Pinning-Policy (verbindlich)
 
@@ -136,6 +149,12 @@ Ein Update von Base-Image oder Kernpaketen ist nur zulässig mit:
 ### C) Ungepinntes Latest-Tracking
 
 - **Verworfen**, da nicht auditierbar genug und zu hohe Drift-Risiken.
+
+### D) Alpine-basierter Runtime-Stack (musl)
+
+- **Verworfen**, da CUDA-/PyTorch-Ökosystem für diesen Legacy-K80-Stack primär auf glibc-basierte Distributionen (Ubuntu/Debian) ausgerichtet ist.
+- Alpine (musl) erhöht das Risiko für Wheel-/Binary-Inkompatibilitäten, zusätzliche Source-Builds und instabile Reproduzierbarkeit.
+- Für den Betriebszweck (K80 + eingefrorene Treiber/CUDA-Baseline) ist ein Ubuntu-basierter CUDA-Stack der robustere, auditierbare Standardpfad.
 
 ---
 

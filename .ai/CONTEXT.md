@@ -98,5 +98,12 @@ Der Smoke-Workflow führt deterministisch aus:
 - `max_seq_length` konservativ halten
 - Bei OOM zuerst Sequenzlänge reduzieren, dann weitere Parameter anpassen
 
+## Meilensteinstatus (aktuell)
+- Container CUDA Validierung erfolgreich abgeschlossen:
+  - `nvidia-smi` im Container erkennt Tesla K80 korrekt
+  - PyTorch CUDA ist verfügbar (`torch.cuda.is_available() == true`)
+  - Verifizierter Runtime-Stand: `torch 1.12.1+cu113`, `CUDA 11.3`, `compute capability 3.7`
+- Ergebnis: GPU-basierter Trainingsbetrieb ist grundsätzlich freigegeben (vorbehaltlich erfolgreichem Smoke-Run und stabilem Kurz-Trainingslauf).
+
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

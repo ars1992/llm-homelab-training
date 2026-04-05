@@ -184,7 +184,28 @@ Hinweise:
   - `gradient_accumulation_steps` erhöhen
   - `seq_len` reduzieren
   - Gradient Checkpointing aktivieren
-- Details und bekannte Probleme: `docs/TROUBLESHOOTING_K80.md`
+
+### Verbindliche Legacy-GPU Baseline (frozen)
+
+Für dieses Projekt ist eine feste, stabile GPU-Software-Baseline definiert:
+
+- NVIDIA Driver (Host): `470.256.02`
+- CUDA Runtime laut `nvidia-smi`: `11.4`
+- Ziel-GPU: `Tesla K80`
+
+Betriebsregel:
+- Treiber/CUDA werden **nicht** aktualisiert.
+- Änderungen sind nur per expliziter Ausnahmefreigabe mit Risikoanalyse und Rollback-Plan zulässig.
+
+Basisimage-Entscheidung (Ubuntu statt Alpine):
+- Für CUDA-/PyTorch-Workloads auf K80 nutzen wir Ubuntu-basierte NVIDIA-Images.
+- Grund: Höhere Kompatibilität mit glibc-basierten CUDA/PyTorch-Wheels und reproduzierbarere Installation von `transformers`/`peft`-Abhängigkeiten.
+- Alpine (musl) ist für diesen Stack bewusst ausgeschlossen, da es häufiger zu Build-/Kompatibilitätsproblemen führt.
+
+Referenzen:
+- K80 Troubleshooting: `docs/TROUBLESHOOTING_K80.md`
+- GPU Datenblatt: `.ai/GPU-DATENBLATT-K80-HOMELAB.md`
+- Erste-Testlauf-Checkliste: `.ai/CHECKLIST-ERSTER-TESTLAUF-K80.md`
 
 ---
 

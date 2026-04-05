@@ -1,20 +1,32 @@
-# Reproducible trainer dependencies (pinned).
-# CUDA wheels for PyTorch are resolved from the official index below.
---extra-index-url https://download.pytorch.org/whl/cu118
+# Reproducible K80-compatible training dependencies (pinned).
+# Baseline target:
+# - Host NVIDIA Driver: 470.256.02
+# - CUDA runtime path aligned to cu113 wheels
+# Notes:
+# - Intentionally no torchvision/torchaudio (not needed for this text-only LoRA workflow).
+# - PEFT/HF stack pinned to versions compatible with torch 1.12.x.
 
-torch==2.1.2+cu118
-transformers==4.38.2
-datasets==2.18.0
-accelerate==0.27.2
-peft==0.10.0
-tensorboard==2.16.2
+--extra-index-url https://download.pytorch.org/whl/cu113
 
-# Common runtime deps used by training/data scripts
-safetensors==0.4.2
+# Core CUDA stack
+torch==1.12.1+cu113
+
+# Hugging Face / LoRA stack (torch 1.12 compatible)
+transformers==4.30.2
+datasets==2.14.0
+accelerate==0.20.3
+# peft intentionally excluded from default image:
+# all published peft versions require torch>=1.13.0 and conflict with torch==1.12.1+cu113 on this K80 baseline.
+
+# Logging / runtime utilities
+tensorboard==2.13.0
+tokenizers==0.13.3
+safetensors==0.3.3
 sentencepiece==0.1.99
 PyYAML==6.0.1
 tqdm==4.66.2
-numpy==1.26.4
+numpy==1.24.4
+psutil==7.2.2
 
-# Optional: 8-bit quantization. On K80 this can be unstable/incompatible depending on CUDA stack.
-# bitsandbytes==0.42.0 ; platform_system == "Linux"
+# Optional (disabled by default on K80 due to compatibility risk):
+# bitsandbytes==0.41.1 ; platform_system == "Linux"

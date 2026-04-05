@@ -120,3 +120,77 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - Audit-Restore eines konkreten Run-ID
       - Full-critical-Restore
       - monatlicher Dependency-Drift-Check
+
+- 2026-04-05 (Eliot First-Run Empfehlungen):
+  - Reifegrad-Einschätzung:
+    - Solides MVP mit End-to-End-Bausteinen (Build/Run -> Daten -> Train -> Eval -> Ops/Doku).
+    - Ops-Reife über Basisniveau durch `Makefile`, Preflight/Smoke, GPU-Checks und gepinnte Abhängigkeiten.
+    - Weiterhin MVP, bis K80-Stabilität über mehrere echte Läufe verifiziert ist.
+  - Sicherster erster Testlauf auf K80 (Reihenfolge):
+    - 1) Host/Stack prüfen (`check_gpu.sh`, `make preflight`)
+    - 2) Container minimal starten und CUDA-Verfügbarkeit in Python prüfen
+    - 3) Dataset-Smoke mit kleinem Slice (Format/Encoding/Felder prüfen)
+    - 4) Kurz-Training mit `smoke_lora.yaml` (wenige Steps, deterministisch)
+    - 5) Mini-Eval auf kleinem `val`-Subset
+    - 6) Erst danach kurzer Real-Run mit `train_lora_3b_k80.yaml`, dann Voll-Run
+    - 7) Self-Edit erst nach stabiler Baseline aktivieren
+  - Häufigste Fehler zu Beginn vermeiden:
+    - OOM durch zu aggressive `seq_len`/Batch/Precision-Konfiguration
+    - CUDA/Driver/Torch-Mismatch im Container
+    - Schema-Drift in JSONL-Daten (fehlende Felder, leere Inhalte, kaputte Encodings)
+    - Fehlende Run-Disziplin (keine Run-ID, keine Config-/Commit-Zuordnung)
+    - Zu frühes Parallel-Debugging von Baseline-Training und Self-Edit-Loop
+  - Kritische Betriebsfestlegung GPU-Stack (frozen baseline, verbindlich):
+    - NVIDIA Driver (Host): `470.256.02`
+    - CUDA Runtime laut `nvidia-smi`: `11.4`
+    - No-Update-Policy: Keine Updates von NVIDIA-Treiber oder CUDA durchführen, da dies die letzte stabile Version für den Betrieb ist.
+    - Änderungen an Driver/CUDA nur per expliziter Ausnahmeentscheidung mit dokumentiertem Rollback-Plan.
+  - Hinweis zum aktuellen Preflight-Warnsignal:
+    - Warnung zu Compute Capability (`below minimum 3.7`) trotz K80-Bestand kann aus Check-Parsing resultieren.
+    - Bis zur technischen Klärung gilt: tatsächliche GPU-Identität über `nvidia-smi -L` und Container-Torch-Checks priorisieren.
+  - Root-Cause dokumentiert (CUDA-Sichtbarkeit im Container):
+    - Symptom: `nvidia-smi` im Container sieht K80, aber `torch.cuda.is_available() == False` (teils `device_count` inkonsistent).
+    - Ursache: Container-/Wheel-Stack war auf `cu118` (`torch==2.1.2+cu118`) bei Host Driver `470.256.02` + K80; diese Kombination ist nicht kompatibel.
+    - Einordnung: NVML-Pfad kann funktionieren (`nvidia-smi`), während CUDA-Context-Initialisierung für PyTorch fehlschlägt.
+  - Remediation dokumentiert (ohne Driver/CUDA-Hostupdate):
+    - Base-Image auf `nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu22.04` abgesenkt.
+    - Python-Stack auf K80-/Driver-470-kompatible Versionen gepinnt:
+      - `torch==1.12.1+cu113`
+      - `torchvision==0.13.1+cu113`
+      - `torchaudio==0.12.1`
+      - `transformers==4.31.0`
+      - `accelerate==0.21.0`
+      - `peft==0.5.0`
+      - `datasets==2.14.0`
+    - GPU-Check korrigiert: `cuda_device_count` wird jetzt unabhängig von `is_available` ausgegeben (bessere Diagnose).
+  - Verbindliche Verifikationsreihenfolge nach Änderung:
+    - `make build`
+    - `make up`
+    - `make check-gpu-container`
+    - optional `make smoke` vor erstem längeren Trainingslauf
+  - Ablagehinweis korrigiert:
+    - Externe Vault-Pfade sind für dieses Projekt außer Scope.
+    - Betriebsrelevante Baseline-Dokumentation bleibt im Projekt-Repository.
+  - Alpine-Rationale dokumentiert:
+    - Für CUDA-/PyTorch-/Transformers-Workloads auf K80 wird Ubuntu/Debian-Basis verwendet, nicht Alpine.
+    - Grund: bessere Kompatibilität im glibc-/CUDA-Ökosystem; Alpine (musl) erhöht Build-/Runtime-Risiken bei ML-Wheels.
+  - CUDA-Image-Tag-Auflösung dokumentiert:
+    - Fehlerursache beim Build war ein nicht existierender Tag mit `ubuntu22.04` für CUDA `11.3.1`.
+    - Verifizierter gültiger Tag: `nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04`.
+    - Entscheidungsregel: Bei Legacy-K80 immer Tag-Existenz vor Stack-Änderungen verifizieren und Baseline anschließend fixieren.
+  - PEFT-Metadaten-Constraint dokumentiert (Torch 1.12 Kompatibilität):
+    - Verifiziert: `peft` Versionen `0.1.0` bis `0.4.0` deklarieren in den Paket-Metadaten `torch>=1.13.0`.
+    - Konsequenz: Mit `torch==1.12.1+cu113` ist eine normale pip-Auflösung mit PEFT nicht möglich (`ResolutionImpossible`).
+    - Verbindliche K80-kompatible Basis-Pins (ohne automatische PEFT-Abhängigkeitsauflösung):
+      - `torch==1.12.1+cu113`
+      - `transformers==4.30.2`
+      - `accelerate==0.20.3`
+    - Workaround (Ausnahmeverfahren): `peft` nur per `--no-deps` installieren, nachdem der Basis-Stack fix installiert wurde.
+    - Zusatzregel zum Workaround:
+      - Nach `--no-deps` ist ein verpflichtender Import-/Runtime-Sanity-Check durchzuführen.
+      - Der Lauf muss als „Dependency-Override“ im Run-Metadatenblock markiert werden (inkl. PEFT-Version, Commit, UTC-Zeit).
+      - Bei Import-/Runtime-Fehler gilt: Workaround verwerfen und PEFT für diesen Stack deaktivieren.
+    - Zusätzliche Stabilitätsregel:
+      - `torchvision` und `torchaudio` bleiben aus dem Standard-Stack entfernt, da für den textbasierten LoRA-Workflow nicht erforderlich und konfliktanfällig.
+    - Betriebsfolge nach Dependency-Änderungen:
+      - `make build` -> `make up` -> `make check-gpu-container` -> optional `make smoke` vor Real-Run.

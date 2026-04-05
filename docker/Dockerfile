@@ -1,7 +1,7 @@
 # CUDA-based trainer image for local LoRA fine-tuning on NVIDIA GPUs (including legacy K80 setups).
 # Focus: reproducibility via pinned Python dependencies.
 
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
@@ -32,8 +32,11 @@ WORKDIR /workspace
 
 # Install pinned training stack
 COPY docker/requirements.txt /tmp/requirements.txt
-RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt \
- && rm -f /tmp/requirements.txt
+RUN grep -v '^peft==' /tmp/requirements.txt > /tmp/requirements.core.txt \
+ && python -m pip install --no-cache-dir -r /tmp/requirements.core.txt \
+ && python -m pip install --no-cache-dir --no-deps peft==0.3.0 \
+ && python -c "import torch, transformers, datasets, accelerate, peft, safetensors, yaml, sentencepiece; print('import-sanity-ok')" \
+ && rm -f /tmp/requirements.txt /tmp/requirements.core.txt
 
 # Prepare common runtime directories
 RUN mkdir -p /workspace/src /workspace/configs /workspace/data /workspace/.cache/huggingface
