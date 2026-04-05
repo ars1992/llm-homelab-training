@@ -177,7 +177,39 @@ Nach Anpassung auf den Legacy-kompatiblen Stack wurde der Container-Check erfolg
 Interpretation:
 - Der CUDA-Initialisierungspfad für PyTorch ist funktionsfähig.
 - Damit ist das frühere Mismatch-Symptom (`nvidia-smi` OK, `is_available=False`) für diese Baseline behoben.
-- Ein verbleibender Parser-Warnhinweis zur Compute-Capability-Ausgabe ist nicht als Runtime-Blocker zu werten, solange die obigen Werte erfolgreich gemeldet werden.
+- Der Parser-Warnhinweis zur Compute-Capability-Ausgabe ist für diese geprüfte Ausgabe behoben (`compute_capability_0` wird korrekt erkannt).
+
+#### Smoke-Run Befunde (2026-04-05)
+
+Im ersten vollständigen `make smoke` Lauf wurden zwei relevante Probleme beobachtet:
+
+1. **Trainingsteil: Dataset/FSSpec-Inkompatibilität**
+   - Fehler:
+     - `TypeError: can only concatenate tuple (not "str") to tuple`
+   - Ort:
+     - beim Aufruf von `load_dataset("json", data_files=...)` in `train_lora.py`
+   - Einordnung:
+     - kein GPU-/CUDA-Problem, sondern eine Python-Abhängigkeits-/Kompatibilitätsfrage im `datasets`/`fsspec`-Pfad.
+
+2. **Eval-Teil: fehlender Adapter nach fehlgeschlagenem Training**
+   - Fehler:
+     - `ValueError: Can't find 'adapter_config.json' at '/workspace/data/models/<run-id>'`
+   - Ursache:
+     - der Trainingsschritt ist zuvor fehlgeschlagen, daher wurde kein LoRA-Adapter geschrieben.
+   - Folge:
+     - Eval konnte den erwarteten Adapterpfad nicht laden.
+
+#### Wichtige Betriebsregel für Smoke-Ergebnisse
+
+Der aktuelle `Makefile`-Smoke-Workflow meldet trotz Zwischenfehlern am Ende `OK`, weil die betroffenen Targets kein hartes Fail-Fast erzwingen.
+
+Daher gilt bis zur Korrektur:
+- Ein Smoke-Run ist nur dann als **bestanden** zu werten, wenn **alle** Kriterien erfüllt sind:
+  1. Training ohne Traceback abgeschlossen
+  2. Adapter-Artefakte vorhanden (`data/models/<run-id>/adapter_config.json`)
+  3. Eval ohne Traceback abgeschlossen
+  4. `data/evals/<run-id>/summary.json` vorhanden
+- Das reine Abschluss-Log `OK: smoke workflow completed` ist **nicht** ausreichend als Qualitäts- oder Stabilitätsnachweis.
 
 Wenn einer dieser Checks fehlschlägt, zuerst Treiber/Container-Runtime/PyTorch-Build ausrichten, bevor Trainingsparameter angepasst werden.
 

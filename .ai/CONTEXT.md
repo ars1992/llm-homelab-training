@@ -103,7 +103,17 @@ Der Smoke-Workflow führt deterministisch aus:
   - `nvidia-smi` im Container erkennt Tesla K80 korrekt
   - PyTorch CUDA ist verfügbar (`torch.cuda.is_available() == true`)
   - Verifizierter Runtime-Stand: `torch 1.12.1+cu113`, `CUDA 11.3`, `compute capability 3.7`
-- Ergebnis: GPU-basierter Trainingsbetrieb ist grundsätzlich freigegeben (vorbehaltlich erfolgreichem Smoke-Run und stabilem Kurz-Trainingslauf).
+
+- Smoke-Run ausgeführt (`SMOKE_RUN_ID=smoke-20260405T165115Z`) mit **teilweisem Erfolg**:
+  - Erfolgreich: Host-Preflight, Container-Build, Container-GPU-Check, Modell-/Tokenizer-Download
+  - Fehler 1 (Trainingsblocker): `TypeError: can only concatenate tuple (not "str") to tuple` in `datasets`/`fsspec`-Pfadauflösung bei `load_dataset("json", ...)`
+  - Fehler 2 (Folgefehler Eval): `adapter_config.json` fehlt unter `data/models/<run-id>/`, weil Training vor Adapter-Speicherung abgebrochen ist
+  - Prozessproblem: `make smoke` meldet trotz Fehlern „completed“, da Exit-Status der Teilschritte aktuell nicht strikt als Gate behandelt wird
+
+- Gate-Entscheidung:
+  - **Kein** erster Real-Trainingslauf, bis die beiden Blocker behoben sind:
+    1. Kompatibilitätsfix `datasets`/`fsspec` im Trainingspfad
+    2. Fail-fast-Absicherung im Smoke-Target (Fehler dürfen nicht als Erfolg durchlaufen)
 
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

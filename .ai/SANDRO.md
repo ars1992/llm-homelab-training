@@ -178,6 +178,24 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - Fehlerursache beim Build war ein nicht existierender Tag mit `ubuntu22.04` für CUDA `11.3.1`.
     - Verifizierter gültiger Tag: `nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04`.
     - Entscheidungsregel: Bei Legacy-K80 immer Tag-Existenz vor Stack-Änderungen verifizieren und Baseline anschließend fixieren.
+  - Smoke-Run Incident dokumentiert (Run-ID: `smoke-20260405T165115Z`):
+    - Host- und Container-GPU-Checks vollständig erfolgreich (`torch.cuda.is_available() == true`, `compute_capability_0 == 3.7`).
+    - Build und Modell-Download erfolgreich (OPT-2.7B geladen, LoRA-Trainable Params korrekt angezeigt).
+    - Trainingsskript schlug beim Dataset-Load fehl:
+      - Fehler: `TypeError: can only concatenate tuple (not "str") to tuple`
+      - Ort: `load_dataset("json", data_files=...)` in `train_lora.py`
+      - Wahrscheinlicher Zusammenhang: Abhängigkeitsinkompatibilität im `datasets`/`fsspec` Stack für die gewählten Legacy-Pins.
+    - Folgefehler in Eval:
+      - `adapter_config.json` nicht gefunden unter `data/models/smoke-...`
+      - Ursache: Training brach vor Adapter-Save ab.
+    - Prozesslücke identifiziert:
+      - `make smoke` meldete trotz Train/Eval-Fehler „completed“.
+      - Schlussfolgerung: Smoke-Targets müssen bei Fehlern hart abbrechen (`set -e`/saubere Exit-Code-Propagation), damit keine False-Green Ergebnisse entstehen.
+  - Follow-up Aktionen (verbindlich):
+    - Versionsmatrix `datasets`/`fsspec`/`pyarrow` für torch-1.12-kompatiblen Stack verifizieren und fix pinnen.
+    - `train_lora.py` um robustes Exception-Handling + klare Fehlerklassifikation beim Dataset-Load ergänzen.
+    - `Makefile` Smoke-Targets so anpassen, dass Train/Eval-Fehler den Lauf sofort als failed markieren.
+    - Erst nach erfolgreichem Smoke ohne Fehler in den ersten kurzen Real-Run wechseln.
   - PEFT-Metadaten-Constraint dokumentiert (Torch 1.12 Kompatibilität):
     - Verifiziert: `peft` Versionen `0.1.0` bis `0.4.0` deklarieren in den Paket-Metadaten `torch>=1.13.0`.
     - Konsequenz: Mit `torch==1.12.1+cu113` ist eine normale pip-Auflösung mit PEFT nicht möglich (`ResolutionImpossible`).
