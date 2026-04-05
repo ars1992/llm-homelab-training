@@ -190,6 +190,12 @@ Im ersten vollständigen `make smoke` Lauf wurden zwei relevante Probleme beobac
      - beim Aufruf von `load_dataset("json", data_files=...)` in `train_lora.py`
    - Einordnung:
      - kein GPU-/CUDA-Problem, sondern eine Python-Abhängigkeits-/Kompatibilitätsfrage im `datasets`/`fsspec`-Pfad.
+   - Maßnahme (verbindlich gepinnt):
+     - `datasets==2.14.0`
+     - `fsspec==2023.6.0`
+     - `pyarrow==12.0.1`
+   - Zweck der Maßnahme:
+     - Vermeidung der beobachteten `TypeError`-Inkompatibilität bei `load_dataset("json", ...)` im Legacy-K80-Stack.
 
 2. **Eval-Teil: fehlender Adapter nach fehlgeschlagenem Training**
    - Fehler:
@@ -201,15 +207,18 @@ Im ersten vollständigen `make smoke` Lauf wurden zwei relevante Probleme beobac
 
 #### Wichtige Betriebsregel für Smoke-Ergebnisse
 
-Der aktuelle `Makefile`-Smoke-Workflow meldet trotz Zwischenfehlern am Ende `OK`, weil die betroffenen Targets kein hartes Fail-Fast erzwingen.
+Der `Makefile`-Smoke-Workflow ist auf Fail-Fast gehärtet:
+- `smoke-train` bricht bei Trainingsfehlern sofort ab.
+- Zusätzlich wird das Vorhandensein von `data/models/<run-id>/adapter_config.json` verpflichtend geprüft.
+- `smoke-infer` prüft vor Eval erneut das Adapter-Artefakt und nach Eval das Vorhandensein von `data/evals/<run-id>/summary.json`.
 
-Daher gilt bis zur Korrektur:
-- Ein Smoke-Run ist nur dann als **bestanden** zu werten, wenn **alle** Kriterien erfüllt sind:
+Bewertung eines Smoke-Runs:
+- Ein Smoke-Run gilt nur dann als **bestanden**, wenn **alle** Kriterien erfüllt sind:
   1. Training ohne Traceback abgeschlossen
   2. Adapter-Artefakte vorhanden (`data/models/<run-id>/adapter_config.json`)
   3. Eval ohne Traceback abgeschlossen
   4. `data/evals/<run-id>/summary.json` vorhanden
-- Das reine Abschluss-Log `OK: smoke workflow completed` ist **nicht** ausreichend als Qualitäts- oder Stabilitätsnachweis.
+- Ein einzelnes Abschluss-Log ohne diese Artefakte ist **nicht** ausreichend als Qualitäts- oder Stabilitätsnachweis.
 
 Wenn einer dieser Checks fehlschlägt, zuerst Treiber/Container-Runtime/PyTorch-Build ausrichten, bevor Trainingsparameter angepasst werden.
 

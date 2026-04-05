@@ -211,4 +211,18 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - Zusätzliche Stabilitätsregel:
       - `torchvision` und `torchaudio` bleiben aus dem Standard-Stack entfernt, da für den textbasierten LoRA-Workflow nicht erforderlich und konfliktanfällig.
     - Betriebsfolge nach Dependency-Änderungen:
-      - `make build` -> `make up` -> `make check-gpu-container` -> optional `make smoke` vor Real-Run.
+      - `make build` -> `make up` -> `make check-gpu-container` -> `make smoke` (verpflichtend) vor Real-Run.
+  - Kompatibilitätsfix dokumentiert (Smoke-Run `smoke-20260405T165115Z`):
+    - GPU-Stack erfolgreich validiert:
+      - `torch 1.12.1+cu113`
+      - `torch.cuda.is_available() == true`
+      - `compute capability 3.7` auf Tesla K80
+    - Trainingsblocker identifiziert:
+      - `TypeError: can only concatenate tuple (not "str") to tuple` beim `datasets` JSON-Load.
+    - Abhilfe für Legacy-Stack gesetzt:
+      - `fsspec==2023.6.0`
+      - `pyarrow==12.0.1`
+  - Smoke-Gate-Härtung umgesetzt:
+    - `smoke-train` bricht jetzt hart ab, wenn `adapter_config.json` fehlt.
+    - `smoke-infer` prüft Adapter-Artefakte vor Eval und verlangt `summary.json` als Erfolgsnachweis.
+    - Prozessregel: `make smoke` gilt nur als bestanden, wenn Train + Eval + Artefaktchecks ohne Fehler durchlaufen.

@@ -128,19 +128,23 @@ smoke-dataset: ensure-data-dirs
 	@echo "OK: wrote $(SMOKE_DATASET)"
 
 smoke-train: up smoke-dataset
-	@RUN_ID=smoke-$$(date -u +%Y%m%dT%H%M%SZ); \
+	@set -e; \
+	RUN_ID=smoke-$$(date -u +%Y%m%dT%H%M%SZ); \
 	echo "$$RUN_ID" > $(SMOKE_RUN_ID_FILE); \
 	echo "SMOKE_RUN_ID=$$RUN_ID"; \
 	$(COMPOSE) exec $(SERVICE) python src/scripts/train_lora.py \
 		--config configs/smoke_lora.yaml \
 		--dataset $(SMOKE_DATASET) \
 		--run-id $$RUN_ID; \
+	test -f data/models/$$RUN_ID/adapter_config.json || { echo "ERROR: missing adapter_config.json for $$RUN_ID"; exit 1; }; \
 	echo "OK: smoke train finished for $$RUN_ID"
 
 smoke-infer: up
 	@test -f $(SMOKE_RUN_ID_FILE) || { echo "ERROR: missing $(SMOKE_RUN_ID_FILE) (run smoke-train first)"; exit 1; }
-	@RUN_ID=$$(cat $(SMOKE_RUN_ID_FILE)); \
+	@set -e; \
+	RUN_ID=$$(cat $(SMOKE_RUN_ID_FILE)); \
 	echo "SMOKE_RUN_ID=$$RUN_ID"; \
+	test -f data/models/$$RUN_ID/adapter_config.json || { echo "ERROR: missing adapter_config.json for $$RUN_ID (training did not produce adapter artifacts)"; exit 1; }; \
 	$(COMPOSE) exec $(SERVICE) python src/scripts/eval.py \
 		--dataset $(SMOKE_DATASET) \
 		--base-model $(BASE_MODEL) \
@@ -149,6 +153,7 @@ smoke-infer: up
 		--max-samples 1 \
 		--max-new-tokens 16 \
 		--batch-size 1; \
+	test -f data/evals/$$RUN_ID/summary.json || { echo "ERROR: missing eval summary for $$RUN_ID"; exit 1; }; \
 	echo "OK: smoke infer finished for $$RUN_ID"
 
 smoke-report:
