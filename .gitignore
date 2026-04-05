@@ -1,0 +1,66 @@
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# --- Environment files ---
+.env
+.env.*
+!.env.example
+
+# --- Logs / runtime ---
+*.log
+logs/
+tmp/
+temp/
+
+# --- ML / training artifacts (local, non-reproducible outputs) ---
+data/*
+!data/README.md
+
+# --- Model / checkpoint artifacts ---
+checkpoints/
+runs/
+wandb/
+mlruns/
+tensorboard/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# --- Container / Docker ---
+*.tar
+docker/*.local
+docker-compose.override.yml
+
+# --- Misc ---
+.cache/
