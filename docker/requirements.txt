@@ -1,0 +1,20 @@
+# Reproducible trainer dependencies (pinned).
+# CUDA wheels for PyTorch are resolved from the official index below.
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+torch==2.1.2+cu118
+transformers==4.38.2
+datasets==2.18.0
+accelerate==0.27.2
+peft==0.10.0
+tensorboard==2.16.2
+
+# Common runtime deps used by training/data scripts
+safetensors==0.4.2
+sentencepiece==0.1.99
+PyYAML==6.0.1
+tqdm==4.66.2
+numpy==1.26.4
+
+# Optional: 8-bit quantization. On K80 this can be unstable/incompatible depending on CUDA stack.
+# bitsandbytes==0.42.0 ; platform_system == "Linux"
