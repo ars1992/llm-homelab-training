@@ -1,0 +1,78 @@
+# Minimal smoke-test config for fast LoRA verification runs.
+# Purpose:
+# - validate container, model loading, tokenization, trainer loop, and artifact writing
+# - complete quickly on constrained hardware (including K80)
+
+run:
+  run_id: ""
+  run_id_prefix: "smoke-lora"
+  seed: 42
+
+paths:
+  # Provide a tiny dataset (recommended: 8-32 samples).
+  dataset_jsonl: "data/datasets/smoke_train.jsonl"
+  model_output_root: "data/models"
+  log_output_root: "data/logs"
+
+model:
+  # Keep aligned with your default baseline unless explicitly testing another model.
+  base_model_name: "facebook/opt-2.7b"
+  trust_remote_code: false
+  use_fast_tokenizer: true
+
+data:
+  format: "instruction_input_output_jsonl"
+  max_seq_length: 256
+  truncation: true
+  packing: false
+  num_proc: 1
+
+lora:
+  task_type: "CAUSAL_LM"
+  r: 4
+  alpha: 8
+  dropout: 0.05
+  bias: "none"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+
+training:
+  # Smoke behavior: short deterministic run.
+  num_train_epochs: 1
+  max_steps: 5
+
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 1
+
+  learning_rate: 0.0002
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.0
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+
+  # K80-safe defaults
+  fp16: true
+  bf16: false
+  tf32: false
+
+  gradient_checkpointing: true
+  optim: "adamw_torch"
+  dataloader_num_workers: 0
+
+  logging_steps: 1
+  save_steps: 5
+  save_total_limit: 1
+  evaluation_strategy: "no"
+
+  group_by_length: false
+  remove_unused_columns: false
+  report_to:
+    - "tensorboard"
+
+notes:
+  - "Use only for smoke verification, not quality training."
+  - "If OOM still occurs, reduce max_seq_length to 128."

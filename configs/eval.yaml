@@ -1,0 +1,84 @@
+# Evaluation configuration template (MVP)
+# Purpose:
+# - deterministic local evaluation runs
+# - compare base model vs LoRA adapter outputs
+# - write auditable artifacts to /workspace/data/evals/<run_id>/
+
+project:
+  name: llm-homelab-training
+  run_id: "eval-20260101T000000Z"   # override via CLI if needed
+  seed: 42
+
+model:
+  base_model_name: "facebook/opt-2.7b"
+  # Optional LoRA adapter path (set empty string for base-only eval)
+  adapter_path: "/workspace/data/models/latest"
+  device: "cuda"
+  torch_dtype: "float16"            # K80-safe default (bf16 usually not supported on K80)
+
+dataset:
+  path: "/workspace/data/datasets/val.jsonl"
+  format: "jsonl"
+  fields:
+    instruction: "instruction"
+    input: "input"
+    output: "output"
+  max_samples: 200                  # keep low for K80 runtime; set 0 for all samples
+
+prompting:
+  template: |
+    ### Instruction:
+    {instruction}
+
+    ### Input:
+    {input}
+
+    ### Response:
+  include_input_if_empty: false
+  max_source_chars: 8000            # guardrail against very long prompts
+
+inference:
+  max_new_tokens: 256
+  temperature: 0.0                  # deterministic default
+  top_p: 1.0
+  do_sample: false
+  repetition_penalty: 1.0
+  batch_size: 1                     # conservative for K80 VRAM
+
+metrics:
+  enabled:
+    - exact_match
+    - token_f1
+    - rougeL
+  normalize_text: true
+  lowercase: true
+  strip_punctuation: false
+
+outputs:
+  root_dir: "/workspace/data/evals"
+  save_predictions_jsonl: true
+  save_metrics_json: true
+  save_config_snapshot: true
+  tensorboard:
+    enabled: true
+    log_dir: "/workspace/data/logs"
+
+audit:
+  enabled: true
+  event_type: "evaluation_run_completed"
+  required_fields:
+    - run_id
+    - timestamp_utc
+    - base_model_name
+    - adapter_path
+    - dataset_path
+    - sample_count
+    - metrics
+    - git_commit
+  git_commit: "unknown"             # fill in via CLI wrapper/script if available
+
+failure_policy:
+  on_dataset_error: "fail"
+  on_model_load_error: "fail"
+  on_sample_error: "continue"       # continue and log sample-level failures
+  max_sample_errors: 20

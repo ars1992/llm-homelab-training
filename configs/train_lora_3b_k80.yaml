@@ -1,0 +1,105 @@
+# K80-optimized LoRA config for a ~3B causal LM.
+# Focus: stability and reproducibility over speed.
+
+run:
+  # run_id can be overridden by CLI; if empty, script can auto-generate one.
+  run_id: ""
+  run_id_prefix: "lora-3b-k80"
+  seed: 42
+
+paths:
+  # Can be overridden by CLI argument --dataset
+  dataset_jsonl: "data/datasets/train.jsonl"
+  model_output_root: "data/models"
+  log_output_root: "data/logs"
+
+model:
+  # Replace with your chosen base model (must be accessible locally or via Hugging Face).
+  # Example alternatives: "facebook/opt-2.7b", "EleutherAI/pythia-2.8b"
+  base_model_name: "facebook/opt-2.7b"
+  trust_remote_code: false
+  use_fast_tokenizer: true
+
+data:
+  # Expected JSONL format per line:
+  # {"instruction":"...", "input":"...", "output":"..."}
+  format: "instruction_input_output_jsonl"
+  text_template_with_input: |
+    ### Instruction:
+    {instruction}
+
+    ### Input:
+    {input}
+
+    ### Response:
+    {output}
+  text_template_no_input: |
+    ### Instruction:
+    {instruction}
+
+    ### Response:
+    {output}
+  max_seq_length: 512
+  truncation: true
+  packing: false
+  num_proc: 2
+
+lora:
+  task_type: "CAUSAL_LM"
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  bias: "none"
+  # For OPT-like/LLaMA-like models these are common defaults.
+  # If your model uses different module names, adjust here.
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+
+training:
+  # K80-safe defaults (12GB VRAM per GPU, older architecture).
+  num_train_epochs: 3
+  max_steps: -1
+
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+
+  learning_rate: 0.0002
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+
+  # K80 typically supports fp16 but not bf16.
+  fp16: true
+  bf16: false
+  tf32: false
+
+  gradient_checkpointing: true
+  optim: "adamw_torch"
+  dataloader_num_workers: 2
+
+  # Logging / saving
+  logging_steps: 10
+  save_steps: 200
+  save_total_limit: 2
+  evaluation_strategy: "no"
+
+  # Repro / determinism controls (best effort on GPU workloads)
+  group_by_length: true
+  remove_unused_columns: false
+  report_to:
+    - "tensorboard"
+
+hardware:
+  # Informational fields; script may ignore.
+  expected_gpu: "NVIDIA Tesla K80"
+  cuda_visible_devices: "0"
+  nvidia_visible_devices: "all"
+
+notes:
+  - "If OOM: reduce max_seq_length to 384/256 or increase gradient_accumulation_steps."
+  - "If unstable loss: lower learning_rate (e.g. 1e-4)."
+  - "If throughput is too low: keep packing=false for simplicity, then optimize later."

@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/self_edit.schema.json",
+  "title": "Self Edit Record",
+  "description": "Schema for SEAL-inspired self-edit records used to train/evaluate iterative self-improvement workflows.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_id",
+    "source_sample_id",
+    "created_at",
+    "instruction",
+    "input",
+    "original_output",
+    "edited_output",
+    "edit_rationale",
+    "status",
+    "audit"
+  ],
+  "properties": {
+    "record_id": {
+      "type": "string",
+      "description": "Unique identifier of this self-edit record.",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9._:-]+$"
+    },
+    "source_sample_id": {
+      "type": "string",
+      "description": "Identifier of the original sample/prompt this edit is based on.",
+      "minLength": 1
+    },
+    "parent_record_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional reference to previous self-edit iteration.",
+      "minLength": 1
+    },
+    "iteration": {
+      "type": "integer",
+      "description": "Iteration number in a self-edit chain (0 for first edit from base output).",
+      "minimum": 0,
+      "default": 0
+    },
+    "created_at": {
+      "type": "string",
+      "description": "Creation timestamp (RFC3339).",
+      "format": "date-time"
+    },
+    "instruction": {
+      "type": "string",
+      "description": "Primary task instruction.",
+      "minLength": 1
+    },
+    "input": {
+      "type": "string",
+      "description": "Optional additional input/context (can be empty string)."
+    },
+    "original_output": {
+      "type": "string",
+      "description": "Model output before self-edit.",
+      "minLength": 1
+    },
+    "edited_output": {
+      "type": "string",
+      "description": "Model output after self-edit.",
+      "minLength": 1
+    },
+    "edit_rationale": {
+      "type": "string",
+      "description": "Reasoning/justification for the edit.",
+      "minLength": 1
+    },
+    "edit_operations": {
+      "type": "array",
+      "description": "Optional structured list of atomic edit operations.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "target",
+          "reason"
+        ],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "insert",
+              "delete",
+              "replace",
+              "reorder",
+              "clarify",
+              "fact_fix",
+              "safety_fix",
+              "style_fix"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "description": "Edited section/span description.",
+            "minLength": 1
+          },
+          "before": {
+            "type": "string",
+            "description": "Optional previous snippet."
+          },
+          "after": {
+            "type": "string",
+            "description": "Optional new snippet."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "description": "Lifecycle status of the record.",
+      "enum": [
+        "draft",
+        "accepted",
+        "rejected"
+      ]
+    },
+    "quality": {
+      "type": "object",
+      "description": "Optional quality signals from heuristics or judges.",
+      "additionalProperties": false,
+      "properties": {
+        "score_overall": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "score_correctness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "score_clarity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "score_safety": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "judge": {
+          "type": "string",
+          "description": "Evaluator identity (human/model/rule engine)."
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "description": "Optional labels for filtering/analysis.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional arbitrary metadata for experimentation.",
+      "additionalProperties": true
+    },
+    "audit": {
+      "type": "object",
+      "description": "Audit trail fields for reproducibility and traceability.",
+      "additionalProperties": false,
+      "required": [
+        "actor_type",
+        "actor_id",
+        "pipeline",
+        "base_model",
+        "event_id",
+        "event_ts"
+      ],
+      "properties": {
+        "actor_type": {
+          "type": "string",
+          "enum": [
+            "human",
+            "model",
+            "system"
+          ]
+        },
+        "actor_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pipeline": {
+          "type": "string",
+          "description": "Name/version of the generating pipeline.",
+          "minLength": 1
+        },
+        "base_model": {
+          "type": "string",
+          "description": "Base model identifier used to generate original output/edit.",
+          "minLength": 1
+        },
+        "adapter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional adapter/checkpoint identifier."
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "event_id": {
+          "type": "string",
+          "description": "Unique audit event identifier.",
+          "minLength": 1
+        },
+        "event_ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "trace_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional correlation id across services/jobs."
+        }
+      }
+    }
+  }
+}

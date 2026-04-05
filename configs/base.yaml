@@ -1,0 +1,90 @@
+# Base training defaults for llm-homelab-training
+# This file is intentionally hardware-agnostic.
+# Override values in environment-specific configs (e.g. train_lora_3b_k80.yaml).
+
+project:
+  name: llm-homelab-training
+  task: lora_finetune
+  seed: 42
+
+paths:
+  train_dataset: data/datasets/train.jsonl
+  eval_dataset: data/datasets/val.jsonl
+  output_models_root: data/models
+  output_logs_root: data/logs
+
+model:
+  base_model_name: facebook/opt-2.7b
+  trust_remote_code: false
+  use_fast_tokenizer: true
+  torch_dtype: float16
+  attn_implementation: eager
+
+data:
+  format: instruction_input_output_jsonl
+  fields:
+    instruction: instruction
+    input: input
+    output: output
+  prompt_template: |
+    ### Instruction:
+    {instruction}
+
+    ### Input:
+    {input}
+
+    ### Response:
+  max_seq_length: 512
+  truncation: true
+  packing: false
+
+training:
+  run_name_prefix: lora
+  num_train_epochs: 1
+  max_steps: -1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0002
+  weight_decay: 0.0
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  max_grad_norm: 1.0
+  gradient_checkpointing: true
+  dataloader_num_workers: 2
+  logging_steps: 10
+  eval_strategy: "no"
+  save_strategy: steps
+  save_steps: 200
+  save_total_limit: 2
+
+precision:
+  fp16: true
+  bf16: false
+  tf32: false
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+optimizer:
+  type: adamw_torch
+  betas: [0.9, 0.999]
+  eps: 0.00000001
+
+logging:
+  report_to:
+    - tensorboard
+  tensorboard:
+    enabled: true
