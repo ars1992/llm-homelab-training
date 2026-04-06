@@ -222,6 +222,13 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - Abhilfe für Legacy-Stack gesetzt:
       - `fsspec==2023.6.0`
       - `pyarrow==12.0.1`
+    - Zusätzlicher Trainingsblocker identifiziert:
+      - `RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn` während `trainer.train()`.
+    - Root Cause (technisch):
+      - Bei aktivem `gradient_checkpointing` in Kombination mit LoRA waren Input-Gradienten nicht explizit aktiviert.
+    - Remediation umgesetzt:
+      - In `train_lora.py` wird bei aktiviertem Checkpointing `enable_input_require_grads()` genutzt.
+      - Fallback über Forward-Hook auf Embeddings gesetzt, falls die Methode am Modell nicht vorhanden ist.
   - Smoke-Gate-Härtung umgesetzt:
     - `smoke-train` bricht jetzt hart ab, wenn `adapter_config.json` fehlt.
     - `smoke-infer` prüft Adapter-Artefakte vor Eval und verlangt `summary.json` als Erfolgsnachweis.

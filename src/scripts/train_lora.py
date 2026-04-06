@@ -34,7 +34,6 @@ from transformers import (
     set_seed,
 )
 
-
 # -----------------------------
 # Config / defaults
 # -----------------------------
@@ -91,6 +90,7 @@ class RunPaths:
 # Utility functions
 # -----------------------------
 
+
 def utc_run_id(prefix: str = "run") -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{prefix}-{stamp}"
@@ -117,12 +117,16 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _set_if_present(dst: Dict[str, Any], src: Dict[str, Any], src_key: str, dst_key: str) -> None:
+def _set_if_present(
+    dst: Dict[str, Any], src: Dict[str, Any], src_key: str, dst_key: str
+) -> None:
     if src_key in src and src[src_key] is not None:
         dst[dst_key] = src[src_key]
 
 
-def apply_yaml_config(base_cfg: Dict[str, Any], file_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def apply_yaml_config(
+    base_cfg: Dict[str, Any], file_cfg: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Supports both:
     1) flat keys (legacy)
@@ -164,7 +168,9 @@ def apply_yaml_config(base_cfg: Dict[str, Any], file_cfg: Dict[str, Any]) -> Dic
     _set_if_present(cfg, training, "max_steps", "max_steps")
     _set_if_present(cfg, training, "per_device_train_batch_size", "train_batch_size")
     _set_if_present(cfg, training, "per_device_eval_batch_size", "eval_batch_size")
-    _set_if_present(cfg, training, "gradient_accumulation_steps", "gradient_accumulation_steps")
+    _set_if_present(
+        cfg, training, "gradient_accumulation_steps", "gradient_accumulation_steps"
+    )
     _set_if_present(cfg, training, "learning_rate", "learning_rate")
     _set_if_present(cfg, training, "weight_decay", "weight_decay")
     _set_if_present(cfg, training, "warmup_ratio", "warmup_ratio")
@@ -183,7 +189,9 @@ def apply_yaml_config(base_cfg: Dict[str, Any], file_cfg: Dict[str, Any]) -> Dic
 
     # Normalization
     if isinstance(cfg.get("target_modules"), list):
-        cfg["target_modules"] = [m for m in cfg["target_modules"] if isinstance(m, str) and m.strip()]
+        cfg["target_modules"] = [
+            m for m in cfg["target_modules"] if isinstance(m, str) and m.strip()
+        ]
 
     return cfg
 
@@ -220,7 +228,13 @@ def validate_effective_config(cfg: Dict[str, Any]) -> None:
         if key in cfg and cfg[key] is not None:
             cfg[key] = float(cfg[key])
 
-    for key in ("fp16", "bf16", "gradient_checkpointing", "logging_first_step", "save_safetensors"):
+    for key in (
+        "fp16",
+        "bf16",
+        "gradient_checkpointing",
+        "logging_first_step",
+        "save_safetensors",
+    ):
         if key in cfg:
             cfg[key] = bool(cfg[key])
 
@@ -253,9 +267,19 @@ def resolve_run_paths(cfg: Dict[str, Any]) -> RunPaths:
 def validate_dataset_line(obj: Dict[str, Any], line_no: int, src: str) -> None:
     if not isinstance(obj, dict):
         raise ValueError(f"{src}:{line_no} is not a JSON object")
-    if "instruction" not in obj or not isinstance(obj["instruction"], str) or not obj["instruction"].strip():
-        raise ValueError(f"{src}:{line_no} missing non-empty string field 'instruction'")
-    if "output" not in obj or not isinstance(obj["output"], str) or not obj["output"].strip():
+    if (
+        "instruction" not in obj
+        or not isinstance(obj["instruction"], str)
+        or not obj["instruction"].strip()
+    ):
+        raise ValueError(
+            f"{src}:{line_no} missing non-empty string field 'instruction'"
+        )
+    if (
+        "output" not in obj
+        or not isinstance(obj["output"], str)
+        or not obj["output"].strip()
+    ):
         raise ValueError(f"{src}:{line_no} missing non-empty string field 'output'")
     if "input" in obj and not isinstance(obj["input"], str):
         raise ValueError(f"{src}:{line_no} field 'input' must be a string when present")
@@ -301,12 +325,7 @@ def format_sample(instruction: str, input_text: str, output: str) -> str:
             f"{output}"
         )
     else:
-        prompt = (
-            "### Instruction:\n"
-            f"{instruction}\n\n"
-            "### Response:\n"
-            f"{output}"
-        )
+        prompt = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
     return prompt
 
 
@@ -356,7 +375,9 @@ def choose_precision(cfg: Dict[str, Any]) -> Dict[str, bool]:
 
     # If both true, prefer bf16 only if supported.
     if bf16 and not torch.cuda.is_bf16_supported():
-        print("[WARN] bf16 requested but not supported on this GPU. Falling back to fp16.")
+        print(
+            "[WARN] bf16 requested but not supported on this GPU. Falling back to fp16."
+        )
         bf16 = False
         fp16 = True
 
@@ -386,14 +407,33 @@ def print_trainable_parameters(model: torch.nn.Module) -> None:
 # Main train logic
 # -----------------------------
 
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Train LoRA adapter on JSONL instruction dataset.")
+    p = argparse.ArgumentParser(
+        description="Train LoRA adapter on JSONL instruction dataset."
+    )
     p.add_argument("--config", type=str, default="configs/train_lora_3b_k80.yaml")
-    p.add_argument("--dataset", type=str, default=None, help="Override dataset_path from config")
-    p.add_argument("--eval-dataset", type=str, default=None, help="Override eval_dataset_path from config")
-    p.add_argument("--model-name", type=str, default=None, help="Override model_name from config")
-    p.add_argument("--run-id", type=str, default=None, help="Optional run id; defaults to UTC timestamp")
-    p.add_argument("--max-seq-length", type=int, default=None, help="Override max_seq_length")
+    p.add_argument(
+        "--dataset", type=str, default=None, help="Override dataset_path from config"
+    )
+    p.add_argument(
+        "--eval-dataset",
+        type=str,
+        default=None,
+        help="Override eval_dataset_path from config",
+    )
+    p.add_argument(
+        "--model-name", type=str, default=None, help="Override model_name from config"
+    )
+    p.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Optional run id; defaults to UTC timestamp",
+    )
+    p.add_argument(
+        "--max-seq-length", type=int, default=None, help="Override max_seq_length"
+    )
     return p.parse_args()
 
 
@@ -423,7 +463,9 @@ def build_config(args: argparse.Namespace) -> Dict[str, Any]:
     return cfg
 
 
-def load_json_datasets(train_path: Path, eval_path: Optional[Path]) -> Dict[str, Dataset]:
+def load_json_datasets(
+    train_path: Path, eval_path: Optional[Path]
+) -> Dict[str, Dataset]:
     data_files: Dict[str, str] = {"train": str(train_path)}
     if eval_path is not None:
         data_files["validation"] = str(eval_path)
@@ -500,6 +542,22 @@ def main() -> None:
         target_modules=cfg["target_modules"],
     )
     model = get_peft_model(model, lora_cfg)
+
+    # Required for some model/torch combinations when using gradient checkpointing + LoRA.
+    # Without this, backward can fail with:
+    # "element 0 of tensors does not require grad and does not have a grad_fn"
+    if bool(cfg.get("gradient_checkpointing", False)):
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        else:
+
+            def _make_inputs_require_grad(module, inputs, output):
+                output.requires_grad_(True)
+
+            model.get_input_embeddings().register_forward_hook(
+                _make_inputs_require_grad
+            )
+
     print_trainable_parameters(model)
 
     # Dataset load / tokenize

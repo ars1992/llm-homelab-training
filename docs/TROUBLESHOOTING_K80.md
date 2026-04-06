@@ -181,7 +181,7 @@ Interpretation:
 
 #### Smoke-Run Befunde (2026-04-05)
 
-Im ersten vollständigen `make smoke` Lauf wurden zwei relevante Probleme beobachtet:
+Im ersten vollständigen `make smoke` Lauf wurden drei relevante Probleme beobachtet:
 
 1. **Trainingsteil: Dataset/FSSpec-Inkompatibilität**
    - Fehler:
@@ -197,7 +197,17 @@ Im ersten vollständigen `make smoke` Lauf wurden zwei relevante Probleme beobac
    - Zweck der Maßnahme:
      - Vermeidung der beobachteten `TypeError`-Inkompatibilität bei `load_dataset("json", ...)` im Legacy-K80-Stack.
 
-2. **Eval-Teil: fehlender Adapter nach fehlgeschlagenem Training**
+2. **Trainingsteil: Backward-Fehler bei Gradient Checkpointing + LoRA**
+   - Fehler:
+     - `RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn`
+   - Kontext:
+     - trat im Smoke-Lauf nach erfolgreichem Dataset-Load während `trainer.train()` auf.
+   - Ursache (technisch):
+     - bei bestimmten Modell-/Torch-Kombinationen mit aktiviertem `gradient_checkpointing` und LoRA benötigen die Eingaben explizit aktivierte Gradienten.
+   - Umgesetzte Abhilfe:
+     - in `src/scripts/train_lora.py` wurde für den Checkpointing-Pfad die Aktivierung von Input-Gradienten ergänzt (`enable_input_require_grads()` bzw. Hook-Fallback auf Embeddings).
+
+3. **Eval-Teil: fehlender Adapter nach fehlgeschlagenem Training**
    - Fehler:
      - `ValueError: Can't find 'adapter_config.json' at '/workspace/data/models/<run-id>'`
    - Ursache:
@@ -215,9 +225,10 @@ Der `Makefile`-Smoke-Workflow ist auf Fail-Fast gehärtet:
 Bewertung eines Smoke-Runs:
 - Ein Smoke-Run gilt nur dann als **bestanden**, wenn **alle** Kriterien erfüllt sind:
   1. Training ohne Traceback abgeschlossen
-  2. Adapter-Artefakte vorhanden (`data/models/<run-id>/adapter_config.json`)
-  3. Eval ohne Traceback abgeschlossen
-  4. `data/evals/<run-id>/summary.json` vorhanden
+  2. Kein Backward-Fehler vom Typ `does not require grad` / fehlende `grad_fn`
+  3. Adapter-Artefakte vorhanden (`data/models/<run-id>/adapter_config.json`)
+  4. Eval ohne Traceback abgeschlossen
+  5. `data/evals/<run-id>/summary.json` vorhanden
 - Ein einzelnes Abschluss-Log ohne diese Artefakte ist **nicht** ausreichend als Qualitäts- oder Stabilitätsnachweis.
 
 Wenn einer dieser Checks fehlschlägt, zuerst Treiber/Container-Runtime/PyTorch-Build ausrichten, bevor Trainingsparameter angepasst werden.
