@@ -179,9 +179,15 @@ Interpretation:
 - Damit ist das frühere Mismatch-Symptom (`nvidia-smi` OK, `is_available=False`) für diese Baseline behoben.
 - Der Parser-Warnhinweis zur Compute-Capability-Ausgabe ist für diese geprüfte Ausgabe behoben (`compute_capability_0` wird korrekt erkannt).
 
-#### Smoke-Run Befunde (2026-04-05)
+#### Smoke-Run Befunde (2026-04-05 bis 2026-04-06)
 
-Im ersten vollständigen `make smoke` Lauf wurden drei relevante Probleme beobachtet:
+Im ersten vollständigen `make smoke` Lauf (2026-04-05) wurden drei relevante Probleme beobachtet und anschließend technisch behoben (Dependency-Pinning, Input-Grad-Fix, Fail-Fast-Gates im Makefile).
+
+Im Folge-Run (2026-04-06) wurde `make smoke` erfolgreich abgeschlossen:
+- Host-Preflight: erfolgreich (bekannte Host-Warnung zur Compute-Capability blieb bestehen)
+- Container-GPU-Check: erfolgreich
+- Smoke-Training: erfolgreich, Adapter-Artefakte geschrieben
+- Smoke-Eval: erfolgreich, `predictions.jsonl` und `summary.json` vorhanden
 
 1. **Trainingsteil: Dataset/FSSpec-Inkompatibilität**
    - Fehler:
@@ -214,6 +220,22 @@ Im ersten vollständigen `make smoke` Lauf wurden drei relevante Probleme beobac
      - der Trainingsschritt ist zuvor fehlgeschlagen, daher wurde kein LoRA-Adapter geschrieben.
    - Folge:
      - Eval konnte den erwarteten Adapterpfad nicht laden.
+
+#### Verbleibende Eval-Caveats nach erfolgreichem Smoke
+
+Auch bei erfolgreichem Smoke bleiben folgende Punkte zu beachten:
+
+1. **Smoke-Metriken sind kein Qualitätsnachweis**
+   - Im erfolgreichen Smoke-Run wurden `exact_match_mean` und `token_f1_mean` mit `0.0` protokolliert.
+   - Das ist bei extrem kleinem Toy-Dataset und kurzer Trainingsdauer erwartbar und kein Infrastrukturfehler.
+
+2. **Warnung zur Sequenzlänge in Eval**
+   - Hinweis: `Asking to truncate to max_length but no maximum length is provided ...`
+   - Bewertung: nicht kritisch für den Smoke-Gate, aber für reproduzierbare Real-Evals sollte `max_length`/Prompt-Limits explizit gesetzt werden.
+
+3. **Host-Warnung zur Compute-Capability**
+   - Die Host-Prüfung kann weiterhin eine Warnung ausgeben, obwohl K80 korrekt erkannt und Container-CUDA funktionsfähig ist.
+   - Für die Freigabe zählt der erfolgreiche Container-Torch-Check (`cuda_available=True`, Device K80, CC 3.7).
 
 #### Wichtige Betriebsregel für Smoke-Ergebnisse
 

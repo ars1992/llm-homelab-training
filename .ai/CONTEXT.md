@@ -104,16 +104,21 @@ Der Smoke-Workflow führt deterministisch aus:
   - PyTorch CUDA ist verfügbar (`torch.cuda.is_available() == true`)
   - Verifizierter Runtime-Stand: `torch 1.12.1+cu113`, `CUDA 11.3`, `compute capability 3.7`
 
-- Smoke-Run ausgeführt (`SMOKE_RUN_ID=smoke-20260405T165115Z`) mit **teilweisem Erfolg**:
-  - Erfolgreich: Host-Preflight, Container-Build, Container-GPU-Check, Modell-/Tokenizer-Download
-  - Fehler 1 (Trainingsblocker): `TypeError: can only concatenate tuple (not "str") to tuple` in `datasets`/`fsspec`-Pfadauflösung bei `load_dataset("json", ...)`
-  - Fehler 2 (Folgefehler Eval): `adapter_config.json` fehlt unter `data/models/<run-id>/`, weil Training vor Adapter-Speicherung abgebrochen ist
-  - Prozessproblem: `make smoke` meldet trotz Fehlern „completed“, da Exit-Status der Teilschritte aktuell nicht strikt als Gate behandelt wird
+- Smoke-Run erfolgreich abgeschlossen:
+  - `SMOKE_RUN_ID=smoke-20260406T092145Z`
+  - Host-Preflight erfolgreich (Driver `470.256.02`, CUDA Runtime `11.4`, 2x Tesla K80 erkannt)
+  - Container-GPU-Check erfolgreich (`cuda_available=true`, `compute_capability_0=3.7`)
+  - Smoke-Training erfolgreich:
+    - Adapter geschrieben nach `data/models/smoke-20260406T092145Z/`
+    - Logs geschrieben nach `data/logs/smoke-20260406T092145Z/`
+  - Smoke-Eval erfolgreich:
+    - Predictions: `data/evals/smoke-20260406T092145Z/predictions.jsonl`
+    - Summary: `data/evals/smoke-20260406T092145Z/summary.json`
+  - Smoke-Report geschrieben: `data/runs/smoke/report.txt`
 
 - Gate-Entscheidung:
-  - **Kein** erster Real-Trainingslauf, bis die beiden Blocker behoben sind:
-    1. Kompatibilitätsfix `datasets`/`fsspec` im Trainingspfad
-    2. Fail-fast-Absicherung im Smoke-Target (Fehler dürfen nicht als Erfolg durchlaufen)
+  - Erster kurzer Real-Trainingslauf ist freigegeben.
+  - Bedingung: weiterhin konservative K80-Parameter und dokumentierte Run-ID-/Artefaktprüfung pro Lauf.
 
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

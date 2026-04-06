@@ -212,6 +212,28 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - `torchvision` und `torchaudio` bleiben aus dem Standard-Stack entfernt, da für den textbasierten LoRA-Workflow nicht erforderlich und konfliktanfällig.
     - Betriebsfolge nach Dependency-Änderungen:
       - `make build` -> `make up` -> `make check-gpu-container` -> `make smoke` (verpflichtend) vor Real-Run.
+  - Smoke-Run erfolgreich verifiziert (Run-ID: `smoke-20260406T092145Z`):
+    - Host- und Container-Gates bestanden:
+      - Host: Driver `470.256.02`, CUDA Runtime `11.4`, 2x Tesla K80 sichtbar
+      - Container: `torch 1.12.1+cu113`, `torch.cuda.is_available()==true`, `compute_capability_0==3.7`
+    - Trainingspfad erfolgreich:
+      - LoRA Smoke-Training abgeschlossen (`5/5` Steps)
+      - Train-Metrik: `train_loss=3.8740`, `train_runtime=8.2295s`, `train_steps_per_second=0.608`
+      - Adapter-Artefakte wurden unter `data/models/smoke-20260406T092145Z` geschrieben
+    - Eval-Pfad erfolgreich:
+      - Runtime-Device: `cuda:0`
+      - Eval-Artefakte vorhanden:
+        - `data/evals/smoke-20260406T092145Z/predictions.jsonl`
+        - `data/evals/smoke-20260406T092145Z/summary.json`
+      - Smoke-Metriken (ein Sample):
+        - `exact_match_mean=0.0`
+        - `token_f1_mean=0.0`
+        - `prediction_chars_mean=43.0`
+        - `reference_chars_mean=2.0`
+    - Betriebsimplikation:
+      - Smoke-Gate ist als bestanden zu werten (kein False-Green, Train+Eval+Artefaktchecks erfüllt).
+      - Nächster freigegebener Schritt: erster kurzer Real-Trainingslauf mit `configs/train_lora_3b_k80.yaml`.
+      - Hinweis zur Interpretation: Smoke-Metriken dienen primär als Pipeline-Sanity-Check, nicht als Qualitätsbenchmark.
   - Kompatibilitätsfix dokumentiert (Smoke-Run `smoke-20260405T165115Z`):
     - GPU-Stack erfolgreich validiert:
       - `torch 1.12.1+cu113`
