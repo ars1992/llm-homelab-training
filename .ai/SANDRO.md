@@ -270,8 +270,23 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - `train_runtime=1898.2539s`
       - `train_steps_per_second=0.032`
       - `train_samples_per_second=0.506`
+  - Ad-hoc Inference-Test dokumentiert (Prompt-Test auf trainiertem Adapter):
+    - Testfrage: `Beantworte kurz und präzise: was weist du über eliot`
+    - Ausführungspfad:
+      - Dataset: `data/datasets/ask_eliot.jsonl`
+      - Adapter: `data/models/real-20260406T092832Z`
+      - Output: `data/evals/ask-eliot-real-20260406T092832Z/predictions.jsonl`
+    - Beobachtetes Modellverhalten:
+      - Antwort wurde generiert, Inference-Pipeline funktioniert technisch.
+      - Inhalt war repetitiv und enthielt wiederholte `### Response:`-Segmente.
+      - Sprachqualität war reduziert (`... für eine kurze Probleme`), Präzisionsvorgabe wurde nur teilweise erfüllt.
+      - Eval-Kennzahlen (`exact_match_mean=0.0`, `token_f1_mean=0.0`) sind für diesen Test nicht als Qualitätsmaß geeignet, da `reference=placeholder`.
+    - Interpretation:
+      - Infrastruktur und Adapter-Ladepfad sind bestätigt funktionsfähig.
+      - Antwortqualität für freie Q&A-Prompts ist mit aktuellem kleinem Datensatz noch begrenzt.
   - Empfohlener nächster Schritt:
     - Längeren Real-Run freigeben (gleiche Baseline, konservative K80-Parameter), danach standardisierte Eval auf `data/datasets/val.jsonl` durchführen und Ergebnisse gegen den Kurzlauf vergleichen.
+    - Für Q&A-Qualität gezielt zusätzliche Trainingssamples mit kurzen, nicht-repetitiven Antworten ergänzen und Prompt-/Stop-Format in der Inferenz prüfen.
   - Erster Real-Run (kontrolliert) als Standardverfahren festgelegt:
     - Ziel: reproduzierbarer Kurzlauf auf realem Datensatz vor längeren Trainingsläufen.
     - Verbindliche Reihenfolge:

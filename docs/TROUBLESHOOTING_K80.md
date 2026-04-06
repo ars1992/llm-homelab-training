@@ -237,6 +237,14 @@ Auch bei erfolgreichem Smoke bleiben folgende Punkte zu beachten:
    - Die Host-Prüfung kann weiterhin eine Warnung ausgeben, obwohl K80 korrekt erkannt und Container-CUDA funktionsfähig ist.
    - Für die Freigabe zählt der erfolgreiche Container-Torch-Check (`cuda_available=True`, Device K80, CC 3.7).
 
+4. **Wiederholungsmuster im Single-Sample Eval-Output**
+   - Beobachtung: Bei einzelnen Prompt-Tests kann die Ausgabe den Response-Block mehrfach wiederholen (z. B. wiederholte `### Response:`-Segmente).
+   - Einordnung: Dieses Muster ist bei kleinen/engen Testprompts und kurzer LoRA-Trainingsdauer möglich und stellt nicht automatisch einen Infrastrukturfehler dar.
+   - Reaktion:
+     1. Prompt kürzen und klaren Ausgabe-Constraint setzen (z. B. „genau ein Satz“).
+     2. `max_new_tokens` reduzieren und ggf. `repetition_penalty` in Eval-Konfiguration aktivieren.
+     3. Für belastbare Bewertung immer mehrere Samples statt Einzelsample verwenden.
+
 #### Validierung: erster kontrollierter Real-Run (2026-04-06)
 
 Der erste kontrollierte Real-Run wurde erfolgreich abgeschlossen und bestätigt die Betriebsfähigkeit des aktuellen K80-Stacks über den Smoke-Umfang hinaus.

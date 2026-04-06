@@ -179,5 +179,21 @@ Nach jedem Real-Run dokumentieren:
   - `data/models/real-20260406T092832Z/final_metrics.json`
   - `data/logs/real-20260406T092832Z/`
 
+## Ad-hoc Modellfrage Test (2026-04-06)
+
+- Testfrage (Prompt): `Beantworte kurz und präzise: was weist du über eliot`
+- Ausführung: Eval mit Adapter `data/models/real-20260406T092832Z`
+- Ergebnisartefakte:
+  - `data/evals/ask-eliot-real-20260406T092832Z/predictions.jsonl`
+  - `data/evals/ask-eliot-real-20260406T092832Z/summary.json`
+- Beobachtetes Antwortmuster:
+  - Antwort enthält Wiederholungen und Prompt-Leakage (`### Response:` wiederholt im Output).
+  - Inhaltliche Qualität ist für diese Frage unpräzise und nicht faktenorientiert.
+- Interpretation:
+  - Pipeline technisch erfolgreich (Inferenz + Artefaktschreibung), aber Antwortqualität für offene Wissensfragen ist im aktuellen Kurzlauf nicht ausreichend.
+- Folgeaktion:
+  1. Eval-Prompts um klare Antwortgrenzen erweitern (Länge/Format/Stop-Kriterien).
+  2. Val-Set um offene Wissensfragen ergänzen und mit festen Qualitätskriterien evaluieren.
+
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.
