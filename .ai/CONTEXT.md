@@ -120,5 +120,43 @@ Der Smoke-Workflow führt deterministisch aus:
   - Erster kurzer Real-Trainingslauf ist freigegeben.
   - Bedingung: weiterhin konservative K80-Parameter und dokumentierte Run-ID-/Artefaktprüfung pro Lauf.
 
+## Erstes Real-Run Protokoll (verbindlich)
+
+### Ziel
+Ein kontrollierter Kurzlauf auf realem Dataset zur Validierung von Stabilität, Artefaktpfaden und Laufdisziplin vor längeren Trainingsläufen.
+
+### Ausführung (Reihenfolge)
+1. `make preflight`
+2. `make up`
+3. `make check-gpu-container`
+4. `make real-run-short`
+5. `make run-status`
+
+### Verwendete Konfiguration
+- `configs/train_lora_3b_k80_short.yaml`
+- Dataset: `data/datasets/train.jsonl`
+- Run-ID wird automatisch gesetzt und in `data/runs/LATEST_REALRUN_ID` gespeichert.
+
+### Erwartete Pflichtartefakte pro erfolgreichem Real-Run
+- `data/models/<run-id>/adapter_config.json`
+- `data/models/<run-id>/run_metadata.json`
+- `data/models/<run-id>/final_metrics.json`
+- `data/logs/<run-id>/` (TensorBoard-kompatible Logs)
+
+### Abbruch-/No-Go Kriterien
+- Training-Traceback
+- fehlendes `adapter_config.json`
+- fehlendes `final_metrics.json` bei abgeschlossen gemeldetem Lauf
+- GPU-Fehler im Container-Check (`cuda_available=false`)
+
+### Nachbereitung (Audit)
+Nach jedem Real-Run dokumentieren:
+- `run_id`
+- UTC-Zeitstempel
+- Commit-Stand
+- verwendete Config + Dataset
+- Ergebnisstatus (`success`/`failed`)
+- Fehlerklasse und nächste Maßnahme (falls `failed`)
+
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

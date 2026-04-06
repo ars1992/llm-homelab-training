@@ -255,3 +255,25 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - `smoke-train` bricht jetzt hart ab, wenn `adapter_config.json` fehlt.
     - `smoke-infer` prüft Adapter-Artefakte vor Eval und verlangt `summary.json` als Erfolgsnachweis.
     - Prozessregel: `make smoke` gilt nur als bestanden, wenn Train + Eval + Artefaktchecks ohne Fehler durchlaufen.
+  - Erster Real-Run (kontrolliert) als Standardverfahren festgelegt:
+    - Ziel: reproduzierbarer Kurzlauf auf realem Datensatz vor längeren Trainingsläufen.
+    - Verbindliche Reihenfolge:
+      - 1) `make preflight`
+      - 2) `make up`
+      - 3) `make check-gpu-container`
+      - 4) `make real-run-short`
+      - 5) `make run-status`
+    - Konfiguration:
+      - `configs/train_lora_3b_k80_short.yaml`
+      - konservative K80-Parameter (`batch=1`, `fp16=true`, `bf16=false`, `gradient_checkpointing=true`)
+    - Gate-Kriterien für „Real-Run bestanden“:
+      - Training ohne Traceback abgeschlossen
+      - `data/models/<run-id>/adapter_config.json` vorhanden
+      - Logs unter `data/logs/<run-id>/` vorhanden
+      - `run-status` meldet Adapter-Artefakte erfolgreich
+    - No-Go-Kriterien:
+      - CUDA-/GPU-Check nicht grün
+      - fehlende Adapter-Artefakte nach Training
+      - wiederkehrende OOM-/Runtime-Fehler ohne dokumentierte Einzeländerung
+    - Prozessregel:
+      - Pro Wiederholungslauf nur eine Parameteränderung und vollständige Dokumentation mit `run_id`.

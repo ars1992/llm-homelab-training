@@ -16,11 +16,17 @@ SMOKE_STATE_DIR := data/runs/smoke
 SMOKE_RUN_ID_FILE := $(SMOKE_STATE_DIR)/LATEST_RUN_ID
 SMOKE_REPORT := $(SMOKE_STATE_DIR)/report.txt
 
+REALRUN_CONFIG := configs/train_lora_3b_k80_short.yaml
+REALRUN_DATASET := data/datasets/train.jsonl
+RUN_STATE_DIR := data/runs
+LATEST_REALRUN_ID_FILE := $(RUN_STATE_DIR)/LATEST_REALRUN_ID
+
 .PHONY: help \
 	preflight check-docker check-gpu-host check-gpu-container check-paths gpu-info \
 	build up down restart ps logs shell \
 	ensure-data-dirs \
 	train eval prepare-dataset self-edits tensorboard \
+	real-run-short run-status \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
 	clean-smoke clean-data
 
@@ -41,6 +47,8 @@ help:
 	@echo "  prepare-dataset  - Validate/normalize dataset JSONL"
 	@echo "  self-edits       - Generate placeholder self-edit candidates"
 	@echo "  tensorboard      - Start tensorboard in container (port 6006)"
+	@echo "  real-run-short   - Start first controlled K80 real-run with short config"
+	@echo "  run-status       - Show latest real-run id and artifact status"
 	@echo "  smoke            - End-to-end smoke workflow (check/build/up/train/infer/report)"
 	@echo "  clean-smoke      - Remove smoke outputs"
 	@echo "  clean-data       - Remove generated datasets/evals/logs/models (keeps data/README.md)"
@@ -117,6 +125,37 @@ self-edits: up
 
 tensorboard: up
 	@$(COMPOSE) exec $(SERVICE) tensorboard --logdir data/logs --host 0.0.0.0 --port 6006
+
+real-run-short: preflight up check-gpu-container
+	@set -e; \
+	RUN_ID=real-$$(date -u +%Y%m%dT%H%M%SZ); \
+	mkdir -p $(RUN_STATE_DIR); \
+	echo "$$RUN_ID" > $(LATEST_REALRUN_ID_FILE); \
+	echo "REAL_RUN_ID=$$RUN_ID"; \
+	$(COMPOSE) exec $(SERVICE) python src/scripts/train_lora.py \
+		--config $(REALRUN_CONFIG) \
+		--dataset $(REALRUN_DATASET) \
+		--run-id $$RUN_ID; \
+	test -f data/models/$$RUN_ID/adapter_config.json || { echo "ERROR: missing adapter_config.json for $$RUN_ID"; exit 1; }; \
+	echo "OK: real-run-short finished for $$RUN_ID"
+
+run-status:
+	@set -e; \
+	if [ ! -f $(LATEST_REALRUN_ID_FILE) ]; then \
+		echo "ERROR: missing $(LATEST_REALRUN_ID_FILE). Run 'make real-run-short' first."; \
+		exit 1; \
+	fi; \
+	RUN_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
+	echo "LATEST_REAL_RUN_ID=$$RUN_ID"; \
+	echo "model_dir=data/models/$$RUN_ID"; \
+	echo "log_dir=data/logs/$$RUN_ID"; \
+	test -f data/models/$$RUN_ID/adapter_config.json && echo "adapter_config.json: OK" || { echo "adapter_config.json: MISSING"; exit 1; }; \
+	if [ -f data/models/$$RUN_ID/final_metrics.json ]; then \
+		echo "final_metrics.json:"; \
+		cat data/models/$$RUN_ID/final_metrics.json; \
+	else \
+		echo "final_metrics.json: not found (training may have failed early)"; \
+	fi
 
 smoke: preflight build up check-gpu-container smoke-dataset smoke-train smoke-infer smoke-report
 	@echo "OK: smoke workflow completed"
