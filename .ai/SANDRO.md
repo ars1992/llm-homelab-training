@@ -255,6 +255,23 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - `smoke-train` bricht jetzt hart ab, wenn `adapter_config.json` fehlt.
     - `smoke-infer` prüft Adapter-Artefakte vor Eval und verlangt `summary.json` als Erfolgsnachweis.
     - Prozessregel: `make smoke` gilt nur als bestanden, wenn Train + Eval + Artefaktchecks ohne Fehler durchlaufen.
+  - Erster kontrollierter Real-Run erfolgreich abgeschlossen:
+    - `run_id`: `real-20260406T092832Z`
+    - Config: `configs/train_lora_3b_k80_short.yaml`
+    - Dataset: `data/datasets/train.jsonl`
+    - Ergebnis: `success`
+    - Pflichtartefakte vorhanden:
+      - `data/models/real-20260406T092832Z/adapter_config.json`
+      - `data/models/real-20260406T092832Z/final_metrics.json`
+      - `data/logs/real-20260406T092832Z/`
+    - Trainingsmetriken:
+      - `global_step=60`
+      - `train_loss=1.9559472759564718`
+      - `train_runtime=1898.2539s`
+      - `train_steps_per_second=0.032`
+      - `train_samples_per_second=0.506`
+  - Empfohlener nächster Schritt:
+    - Längeren Real-Run freigeben (gleiche Baseline, konservative K80-Parameter), danach standardisierte Eval auf `data/datasets/val.jsonl` durchführen und Ergebnisse gegen den Kurzlauf vergleichen.
   - Erster Real-Run (kontrolliert) als Standardverfahren festgelegt:
     - Ziel: reproduzierbarer Kurzlauf auf realem Datensatz vor längeren Trainingsläufen.
     - Verbindliche Reihenfolge:

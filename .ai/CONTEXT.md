@@ -117,8 +117,19 @@ Der Smoke-Workflow führt deterministisch aus:
   - Smoke-Report geschrieben: `data/runs/smoke/report.txt`
 
 - Gate-Entscheidung:
-  - Erster kurzer Real-Trainingslauf ist freigegeben.
-  - Bedingung: weiterhin konservative K80-Parameter und dokumentierte Run-ID-/Artefaktprüfung pro Lauf.
+  - Erster kurzer Real-Trainingslauf wurde erfolgreich abgeschlossen.
+  - Validierter Run:
+    - `run_id`: `real-20260406T092832Z`
+    - Adapter-Artefakt vorhanden: `data/models/real-20260406T092832Z/adapter_config.json`
+    - Finale Metrikdatei vorhanden: `data/models/real-20260406T092832Z/final_metrics.json`
+    - `global_step`: `60`
+  - Trainingsmetriken (Kurzlauf):
+    - `train_loss`: `1.9559472759564718`
+    - `train_runtime`: `1898.2539s`
+    - `train_steps_per_second`: `0.032`
+    - `train_samples_per_second`: `0.506`
+  - Nächster Gate-Status:
+    - Ein längerer Real-Run ist freigegeben, weiterhin mit konservativen K80-Parametern und vollständiger Run-ID-/Artefaktprüfung.
 
 ## Erstes Real-Run Protokoll (verbindlich)
 
@@ -157,6 +168,16 @@ Nach jedem Real-Run dokumentieren:
 - verwendete Config + Dataset
 - Ergebnisstatus (`success`/`failed`)
 - Fehlerklasse und nächste Maßnahme (falls `failed`)
+
+### Aktueller Nachweis (zuletzt erfolgreicher kontrollierter Real-Run)
+- `run_id`: `real-20260406T092832Z`
+- Config: `configs/train_lora_3b_k80_short.yaml`
+- Dataset: `data/datasets/train.jsonl`
+- Status: `success`
+- Pflichtartefakte:
+  - `data/models/real-20260406T092832Z/adapter_config.json`
+  - `data/models/real-20260406T092832Z/final_metrics.json`
+  - `data/logs/real-20260406T092832Z/`
 
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.
