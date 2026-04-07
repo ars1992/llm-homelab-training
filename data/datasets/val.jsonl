@@ -1,30 +1,30 @@
-{"id":"val-001","instruction":"Antworte mit exakt einem Wort: OK","input":"","expected_contains":["OK"],"tags":["regression"]}
-{"id":"val-002","instruction":"Nenne den primären Projektpfad.","input":"","expected_contains":["/opt/projects/llm-homelab-training"],"tags":["regression","path"]}
-{"id":"val-003","instruction":"Gib den Namen der K80-GPU aus.","input":"","expected_contains":["Tesla K80"],"tags":["regression","gpu"]}
-{"id":"val-004","instruction":"Welche CUDA Runtime ist laut Baseline festgelegt?","input":"","expected_contains":["11.4"],"tags":["regression","baseline"]}
-{"id":"val-005","instruction":"Welcher NVIDIA Driver ist in der Baseline fixiert?","input":"","expected_contains":["470.256.02"],"tags":["regression","baseline"]}
-{"id":"val-006","instruction":"Antworte kurz: Darf der GPU-Stack ohne Freigabe aktualisiert werden?","input":"","expected_contains":["Nein"],"tags":["regression","policy"]}
-{"id":"val-007","instruction":"Nenne den Docker Base-Image-Tag für den Trainer.","input":"","expected_contains":["11.3.1-cudnn8-runtime-ubuntu20.04"],"tags":["regression","docker"]}
-{"id":"val-008","instruction":"Nenne die Torch-Version im Legacy-Stack.","input":"","expected_contains":["1.12.1+cu113"],"tags":["regression","deps"]}
-{"id":"val-009","instruction":"Nenne die Transformers-Version im Legacy-Stack.","input":"","expected_contains":["4.30.2"],"tags":["regression","deps"]}
-{"id":"val-010","instruction":"Nenne die Datasets-Version im Legacy-Stack.","input":"","expected_contains":["2.14.0"],"tags":["regression","deps"]}
-{"id":"val-011","instruction":"Nenne die Accelerate-Version im Legacy-Stack.","input":"","expected_contains":["0.20.3"],"tags":["regression","deps"]}
-{"id":"val-012","instruction":"Nenne die FSSpec-Version für Kompatibilität.","input":"","expected_contains":["2023.6.0"],"tags":["regression","deps"]}
-{"id":"val-013","instruction":"Nenne die PyArrow-Version für Kompatibilität.","input":"","expected_contains":["12.0.1"],"tags":["regression","deps"]}
-{"id":"val-014","instruction":"Wie wird PEFT installiert, um den Torch-Konflikt zu umgehen?","input":"","expected_contains":["--no-deps"],"tags":["regression","deps","peft"]}
-{"id":"val-015","instruction":"Nenne den Smoke-Gate-Check für das Adapter-Artefakt.","input":"","expected_contains":["adapter_config.json"],"tags":["regression","smoke","gates"]}
-{"id":"val-016","instruction":"Nenne den Smoke-Gate-Check für das Eval-Artefakt.","input":"","expected_contains":["summary.json"],"tags":["regression","smoke","gates"]}
-{"id":"val-017","instruction":"Gib den empfohlenen Befehl für den Host-Preflight an.","input":"","expected_contains":["make preflight"],"tags":["regression","sop"]}
-{"id":"val-018","instruction":"Gib den Befehl für den Container-GPU-Check an.","input":"","expected_contains":["make check-gpu-container"],"tags":["regression","sop"]}
-{"id":"val-019","instruction":"Gib den Befehl für den Smoke-Run an.","input":"","expected_contains":["make smoke"],"tags":["regression","sop"]}
-{"id":"val-020","instruction":"Gib den Befehl für den kontrollierten Kurz-Real-Run an.","input":"","expected_contains":["make real-run-short"],"tags":["regression","sop"]}
-{"id":"val-021","instruction":"Wie heißt die Kurzlauf-Config für den ersten Real-Run?","input":"","expected_contains":["train_lora_3b_k80_short.yaml"],"tags":["regression","config"]}
-{"id":"val-022","instruction":"Nenne den Dataset-Pfad für den Real-Run.","input":"","expected_contains":["data/datasets/train.jsonl"],"tags":["regression","dataset"]}
-{"id":"val-023","instruction":"Nenne den Verzeichnispfad für Modellartefakte.","input":"","expected_contains":["data/models"],"tags":["regression","artifacts"]}
-{"id":"val-024","instruction":"Nenne den Verzeichnispfad für Trainingslogs.","input":"","expected_contains":["data/logs"],"tags":["regression","artifacts"]}
-{"id":"val-025","instruction":"Nenne den Verzeichnispfad für Eval-Reports.","input":"","expected_contains":["data/evals"],"tags":["regression","artifacts"]}
-{"id":"val-026","instruction":"Welche Compute Capability wurde im Container-Check bestätigt?","input":"","expected_contains":["3.7"],"tags":["regression","gpu"]}
-{"id":"val-027","instruction":"Nenne den erfolgreichen Smoke-Run-Identifier.","input":"","expected_contains":["smoke-20260406T092145Z"],"tags":["regression","milestone"]}
-{"id":"val-028","instruction":"Nenne den erfolgreichen ersten Real-Run-Identifier.","input":"","expected_contains":["real-20260406T092832Z"],"tags":["regression","milestone"]}
-{"id":"val-029","instruction":"Nenne den global_step des erfolgreichen ersten Real-Runs.","input":"","expected_contains":["60"],"tags":["regression","metrics"]}
-{"id":"val-030","instruction":"Nenne den train_loss des erfolgreichen ersten Real-Runs.","input":"","expected_contains":["1.9559472759564718"],"tags":["regression","metrics"]}
+{"id":"val-001","instruction":"Gib den Projektpfad exakt wieder (nur der Pfad).","input":"Projektpfad: /opt/projects/llm-homelab-training","expected_contains":["/opt/projects/llm-homelab-training"],"tags":["regression","openbook","path","exact"]}
+{"id":"val-002","instruction":"Gib den Compose-Dateipfad exakt aus.","input":"Compose-Datei liegt unter: docker/compose.yaml","expected_contains":["docker/compose.yaml"],"tags":["regression","openbook","compose","exact"]}
+{"id":"val-003","instruction":"Nenne den Service-Namen exakt.","input":"Service in compose: trainer","expected_contains":["trainer"],"tags":["regression","openbook","compose","exact"]}
+{"id":"val-004","instruction":"Gib den Container-Namen exakt wieder.","input":"container_name: llm-homelab-trainer","expected_contains":["llm-homelab-trainer"],"tags":["regression","openbook","compose","exact"]}
+{"id":"val-005","instruction":"Extrahiere den Mount-Zielpfad für Vault-Dokumentation.","input":"Volume-Mount: /mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation:/vault/15_Dokumentation:ro","expected_contains":["/vault/15_Dokumentation"],"tags":["regression","openbook","mount","exact"]}
+{"id":"val-006","instruction":"Nenne den Host-Quellpfad des Vault-Mounts exakt.","input":"Volume-Mount: /mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation:/vault/15_Dokumentation:ro","expected_contains":["/mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation"],"tags":["regression","openbook","mount","exact"]}
+{"id":"val-007","instruction":"Gib den Make-Befehl für den Host-Preflight aus.","input":"SOP: Host-Preflight wird per Make gestartet.","expected_contains":["make preflight"],"tags":["regression","openbook","sop","command"]}
+{"id":"val-008","instruction":"Gib den Make-Befehl für den Container-GPU-Check aus.","input":"SOP: Container-GPU-Check als eigener Make-Target.","expected_contains":["make check-gpu-container"],"tags":["regression","openbook","sop","command"]}
+{"id":"val-009","instruction":"Gib den Make-Befehl für den Smoke-Run aus.","input":"SOP: End-to-End Smoke-Test über Make.","expected_contains":["make smoke"],"tags":["regression","openbook","sop","command"]}
+{"id":"val-010","instruction":"Gib den Make-Befehl für den kurzen Real-Run aus.","input":"SOP: erster kontrollierter Real-Run über Make.","expected_contains":["make real-run-short"],"tags":["regression","openbook","sop","command"]}
+{"id":"val-011","instruction":"Gib den Make-Befehl für den Regression-Eval aus.","input":"Regression-Check läuft über eval_val.py als Make-Target.","expected_contains":["make eval-val"],"tags":["regression","openbook","eval","command"]}
+{"id":"val-012","instruction":"Nenne den Config-Dateinamen für den kurzen Real-Run.","input":"Real-Run Short Config: configs/train_lora_3b_k80_short.yaml","expected_contains":["train_lora_3b_k80_short.yaml"],"tags":["regression","openbook","config","exact"]}
+{"id":"val-013","instruction":"Nenne die Dataset-Config für Regression-Eval.","input":"Dataset Config: configs/datasets/val_regression.yaml","expected_contains":["configs/datasets/val_regression.yaml"],"tags":["regression","openbook","config","exact"]}
+{"id":"val-014","instruction":"Extrahiere den Dataset-Pfad für Training.","input":"Train dataset path: data/datasets/train.jsonl","expected_contains":["data/datasets/train.jsonl"],"tags":["regression","openbook","dataset","exact"]}
+{"id":"val-015","instruction":"Extrahiere den Pflicht-Adapterdateinamen für erfolgreiche Läufe.","input":"Gate: data/models/<run-id>/adapter_config.json muss existieren.","expected_contains":["adapter_config.json"],"tags":["regression","openbook","gates","exact"]}
+{"id":"val-016","instruction":"Extrahiere den Pflicht-Evalreport-Dateinamen.","input":"Gate: data/evals/<run-id>/val_report.json muss existieren.","expected_contains":["val_report.json"],"tags":["regression","openbook","gates","exact"]}
+{"id":"val-017","instruction":"Nenne den CUDA Build-Wert aus dem Check exakt.","input":"Container torch summary: torch_cuda_version=11.3","expected_contains":["11.3"],"tags":["regression","openbook","gpu","exact"]}
+{"id":"val-018","instruction":"Nenne die bestätigte Compute Capability exakt.","input":"Container torch summary: compute_capability_0=3.7","expected_contains":["3.7"],"tags":["regression","openbook","gpu","exact"]}
+{"id":"val-019","instruction":"Extrahiere den GPU-Namen exakt.","input":"Container torch summary: cuda_device_0=Tesla K80","expected_contains":["Tesla K80"],"tags":["regression","openbook","gpu","exact"]}
+{"id":"val-020","instruction":"Nenne den Frozen-Driver exakt.","input":"GPU Baseline: NVIDIA Driver 470.256.02","expected_contains":["470.256.02"],"tags":["regression","openbook","baseline","exact"]}
+{"id":"val-021","instruction":"Nenne die Host-CUDA-Runtime exakt.","input":"GPU Baseline: CUDA Runtime 11.4 (laut nvidia-smi)","expected_contains":["11.4"],"tags":["regression","openbook","baseline","exact"]}
+{"id":"val-022","instruction":"Extrahiere den Base-Image-Kernteil.","input":"Docker Base Image: nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04","expected_contains":["cudnn8-runtime-ubuntu20.04"],"tags":["regression","openbook","docker"]}
+{"id":"val-023","instruction":"Nenne den Output-Pfad für trainierte Adapter (Root).","input":"Artefaktkonvention: Adapter unter data/models/<run-id>/","expected_contains":["data/models"],"tags":["regression","openbook","artifacts"]}
+{"id":"val-024","instruction":"Nenne den Output-Pfad für Logs (Root).","input":"Artefaktkonvention: Logs unter data/logs/<run-id>/","expected_contains":["data/logs"],"tags":["regression","openbook","artifacts"]}
+{"id":"val-025","instruction":"Darf der GPU-Stack ohne Ausnahmefreigabe aktualisiert werden? Antworte mit Ja oder Nein.","input":"","expected_contains":["Nein"],"tags":["regression","closedbook","policy","exact"]}
+{"id":"val-026","instruction":"Formuliere die Secret-Regel für das Repository in einem Satz.","input":"","expected_contains":["nicht","Repository"],"tags":["regression","closedbook","security"]}
+{"id":"val-027","instruction":"Welche Priorität gilt im Projekt: Reproduzierbarkeit oder Fancy Features? Antworte mit einem Wort.","input":"","expected_contains":["Reproduzierbarkeit"],"tags":["regression","closedbook","policy","exact"]}
+{"id":"val-028","instruction":"Nenne die empfohlene OOM-Erstmaßnahme für K80 in einem Satz.","input":"","expected_contains":["max_seq_length","reduz"],"tags":["regression","closedbook","k80","troubleshooting"]}
+{"id":"val-029","instruction":"Sollte Alpine für diesen CUDA/PyTorch-K80-Stack verwendet werden? Antworte mit Ja oder Nein.","input":"","expected_contains":["Nein"],"tags":["regression","closedbook","runtime","exact"]}
+{"id":"val-030","instruction":"Nenne den Pflicht-Gate vor längeren Runs in zwei Stichwörtern.","input":"","expected_contains":["preflight","smoke"],"tags":["regression","closedbook","sop"]}

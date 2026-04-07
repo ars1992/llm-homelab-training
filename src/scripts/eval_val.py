@@ -211,21 +211,38 @@ def evaluate_contains(
     expected_contains: List[str],
     case_sensitive: bool,
     trim_whitespace: bool,
+    tags: Optional[List[str]] = None,
+    exact_tag: str = "exact",
 ) -> Tuple[bool, List[str]]:
     pred_norm = normalize_text(
         prediction,
         trim_whitespace=trim_whitespace,
         case_sensitive=case_sensitive,
     )
-    missing: List[str] = []
-    for needle in expected_contains:
-        needle_norm = normalize_text(
+    normalized_expected: List[str] = [
+        normalize_text(
             needle,
             trim_whitespace=trim_whitespace,
             case_sensitive=case_sensitive,
         )
+        for needle in expected_contains
+    ]
+
+    tag_set = {
+        t.strip().lower() for t in (tags or []) if isinstance(t, str) and t.strip()
+    }
+
+    # Exact mode by tag:
+    # if tags contains "exact", prediction must match one expected token exactly.
+    if exact_tag.strip().lower() in tag_set:
+        if pred_norm in normalized_expected:
+            return True, []
+        return False, expected_contains
+
+    missing: List[str] = []
+    for original_needle, needle_norm in zip(expected_contains, normalized_expected):
         if needle_norm not in pred_norm:
-            missing.append(needle)
+            missing.append(original_needle)
     return len(missing) == 0, missing
 
 
@@ -325,6 +342,7 @@ def main() -> None:
             expected_contains=row["expected_contains"],
             case_sensitive=case_sensitive,
             trim_whitespace=trim_whitespace,
+            tags=row.get("tags", []),
         )
         if passed:
             pass_count += 1
