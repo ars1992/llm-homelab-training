@@ -214,5 +214,29 @@ Nach jedem Real-Run dokumentieren:
   - Passrate und Fail-Cases im Report nachvollziehbar
   - Bei niedriger Passrate: gezielte Datensatz-/Prompt-Verbesserung statt Infrastrukturänderung
 
+## Vault-Dataset-Generierung (15 Dokumentation)
+- Quelle (Host): `/mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation/`
+- Mount im Container (read-only): `/vault/15_Dokumentation`
+- Workflow:
+  1. `make up`
+  2. `make prepare-dataset-vault`
+- Zielartefakte:
+  - Trainingsdataset: `data/datasets/train.jsonl`
+  - Laufbericht: `data/datasets/prepare_report.json`
+
+### Acceptance Checks (verbindlich)
+- `data/datasets/train.jsonl` wird erzeugt und ist UTF-8 JSONL (eine Zeile = ein JSON-Objekt)
+- Schema pro Zeile: `{"instruction":"...","input":"...","output":"..."}`
+- Determinismus:
+  - Dateireihenfolge sortiert
+  - reproduzierbare Extraktionslogik ohne LLM
+- Secret-Redaction aktiv:
+  - keine Treffer auf Schlüsselwörter wie `TOKEN`, `API_KEY`, `SECRET`, `PASSWORD`, `BEGIN PRIVATE KEY`, `OPENAI`, `PAPERLESS_TOKEN`, `HF_TOKEN`
+- Laufstatistik im Report enthalten:
+  - Anzahl `.md` Dateien gefunden/gescannt
+  - Anzahl Sections gescannt
+  - Anzahl Samples geschrieben
+  - Top-Skip-Gründe
+
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

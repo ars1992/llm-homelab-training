@@ -140,7 +140,17 @@ Der Smoke-Workflow führt fail-fast aus:
 5. Mini-Eval/Infer
 6. Smoke-Report unter `data/runs/smoke/report.txt`
 
-### 8) Regression-Eval auf `val.jsonl`
+### 8) Vault-Dokumentation → `train.jsonl`
+
+```bash
+make prepare-dataset-vault
+```
+
+Erzeugt:
+- `data/datasets/train.jsonl`
+- optionaler Report: `data/datasets/prepare_report.json`
+
+### 9) Regression-Eval auf `val.jsonl`
 
 ```bash
 make eval-val

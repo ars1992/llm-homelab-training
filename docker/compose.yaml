@@ -1,26 +1,27 @@
 name: llm-homelab-training
 
 services:
-  trainer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    container_name: llm-homelab-trainer
-    working_dir: /workspace
-    stdin_open: true
-    tty: true
-    environment:
-      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
-      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
-      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
-      HF_HOME: ${HF_HOME:-/workspace/.cache/huggingface}
-      HF_DATASETS_CACHE: ${HF_DATASETS_CACHE:-/workspace/.cache/huggingface/datasets}
-      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/workspace/.cache/huggingface/transformers}
-    volumes:
-      - ../src:/workspace/src
-      - ../configs:/workspace/configs
-      - ../data:/workspace/data
-    gpus: all
-    command: ["sleep", "infinity"]
-    ports:
-      - "${TENSORBOARD_PORT:-6006}:6006"
+    trainer:
+        build:
+            context: ..
+            dockerfile: docker/Dockerfile
+        container_name: llm-homelab-trainer
+        working_dir: /workspace
+        stdin_open: true
+        tty: true
+        environment:
+            NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+            CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+            NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+            HF_HOME: ${HF_HOME:-/workspace/.cache/huggingface}
+            HF_DATASETS_CACHE: ${HF_DATASETS_CACHE:-/workspace/.cache/huggingface/datasets}
+            TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/workspace/.cache/huggingface/transformers}
+        volumes:
+            - ../src:/workspace/src
+            - ../configs:/workspace/configs
+            - ../data:/workspace/data
+            - "/mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation:/vault/15_Dokumentation:ro"
+        gpus: all
+        command: ["sleep", "infinity"]
+        ports:
+            - "${TENSORBOARD_PORT:-6006}:6006"

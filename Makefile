@@ -25,11 +25,15 @@ VAL_REG_CONFIG := configs/datasets/val_regression.yaml
 VAL_REG_DATASET := data/datasets/val.jsonl
 VAL_REG_OUTPUT_ROOT := data/evals
 
+VAULT_DOCS_ROOT := /vault/15_Dokumentation
+VAULT_PREPARE_OUTPUT := data/datasets/train.jsonl
+VAULT_PREPARE_REPORT := data/datasets/prepare_report.json
+
 .PHONY: help \
 	preflight check-docker check-gpu-host check-gpu-container check-paths gpu-info \
 	build up down restart ps logs shell \
 	ensure-data-dirs \
-	train eval eval-val prepare-dataset self-edits tensorboard \
+	train eval eval-val prepare-dataset prepare-dataset-vault self-edits tensorboard \
 	real-run-short run-status \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
 	clean-smoke clean-data
@@ -50,6 +54,7 @@ help:
 	@echo "  eval             - Run eval script on dataset"
 	@echo "  eval-val         - Run deterministic expected_contains regression checks"
 	@echo "  prepare-dataset  - Validate/normalize dataset JSONL"
+	@echo "  prepare-dataset-vault - Build train.jsonl from /vault/15_Dokumentation markdown files"
 	@echo "  self-edits       - Generate placeholder self-edit candidates"
 	@echo "  tensorboard      - Start tensorboard in container (port 6006)"
 	@echo "  real-run-short   - Start first controlled K80 real-run with short config"
@@ -141,6 +146,16 @@ prepare-dataset: up
 	@$(COMPOSE) exec $(SERVICE) python src/scripts/prepare_dataset.py \
 		--input data/datasets/raw.jsonl \
 		--output data/datasets/train.jsonl
+
+prepare-dataset-vault: up
+	@$(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
+		--mode vault_md \
+		--vault-root $(VAULT_DOCS_ROOT) \
+		--output $(VAULT_PREPARE_OUTPUT) \
+		--max-files 500 \
+		--max-samples 5000 \
+		--redact-secrets true \
+		--report $(VAULT_PREPARE_REPORT)
 
 self-edits: up
 	@$(COMPOSE) exec $(SERVICE) python src/scripts/generate_self_edits.py \
