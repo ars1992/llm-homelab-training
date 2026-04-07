@@ -2,11 +2,12 @@
 
 ## Dokumentmetadaten
 - **Status:** Verbindlich
-- **Version:** 1.0
-- **Datum:** 2026-04-05
+- **Version:** 1.1
+- **Datum:** 2026-04-07
 - **Projekt:** `llm-homelab-training`
 - **Scope:** Lokaler Betrieb auf NVIDIA Tesla K80
 - **Owner:** Sandro
+- **Änderungsgrund v1.1:** Host-Responsiveness-Policy und Memory-Pressure-Observability ergänzt
 
 ---
 
@@ -63,14 +64,18 @@ Hinweis:
 |---|---|
 | Precision | `fp16=true`, `bf16=false` |
 | Start Batch Size | `per_device_train_batch_size=1` |
-| Sequenzlänge | konservativ starten (`512`, bei OOM auf `384/256`) |
+| Sequenzlänge | Standard konservativ: `384` (bei weiterem Druck auf `256`) |
 | Gradient Checkpointing | aktiv |
-| Priorität | Stabilität/Reproduzierbarkeit vor Durchsatz |
+| Gradient Accumulation | bei kürzerer Sequenzlänge erhöht betreiben (z. B. `16 -> 24/32`) |
+| Tokenisierung | geringe Parallelität (`num_proc=1`) zur Reduktion von RAM-Peaks |
+| Host-Responsiveness | schwere Schritte mit niedriger Priorität ausführen (`nice`/`ionice`) |
+| Priorität | Stabilität/Reproduzierbarkeit und Bedienbarkeit vor Durchsatz |
 
-Standardreaktion bei OOM:
-1. `max_seq_length` reduzieren
+Standardreaktion bei OOM/Swap-Thrash:
+1. `max_seq_length` reduzieren (erste Maßnahme, z. B. `384 -> 256`)
 2. `gradient_accumulation_steps` erhöhen
-3. erst danach weitere Parameter ändern
+3. Tokenisierungs-/Loader-Parallelität reduzieren
+4. erst danach weitere Parameter ändern
 
 ---
 
@@ -97,11 +102,22 @@ Während des Betriebs beobachten:
 - `nan`/`inf` im Loss
 - stark schwankende oder extrem langsame Steps
 - GPU/Device plötzlich nicht mehr verfügbar
+- Host wird unbedienbar (SSH-Lag, I/O-Stalls, hoher Swap-Druck)
+
+Verbindliche Observability-Snapshots vor/nach schweren Schritten:
+- `free -h`
+- `grep -E 'MemAvailable|SwapTotal|SwapFree' /proc/meminfo`
+- `df -h /`
+
+Betriebsregel für schwere Schritte:
+- `prepare-dataset-vault`, `real-run-short`, `real-run-continue` (optional `eval-val`) nur mit abgesenkter Host-Priorität ausführen.
+- Ziel: System bleibt bedienbar, auch wenn Laufzeit steigt.
 
 Bei Auffälligkeiten:
 1. Lauf stoppen
-2. Status + Fehlertyp dokumentieren
-3. nur **einen** Parameter pro Retry ändern
+2. Status + Fehlertyp dokumentieren (inkl. Mem/Swap-Werte vor/nach)
+3. best-effort Kernel-Hinweise prüfen (`oom|out of memory|killed process`)
+4. nur **einen** Parameter pro Retry ändern
 
 ---
 
@@ -140,6 +156,8 @@ Pflichtfelder im Run-Protokoll:
 - Projekt-Troubleshooting: `docs/TROUBLESHOOTING_K80.md`
 - Backup-Policy: `docs/BACKUP_POLICY.md`
 - Erste-Testlauf-Checkliste: `.ai/CHECKLIST-ERSTER-TESTLAUF-K80.md`
+- Betriebsleitlinie (Swap-Thrash Mitigation): `README.md` (Abschnitt „Swap-Thrash Mitigation“)
+- Host-freundlicher Lauf-Wrapper: `scripts/run_nice.sh`
 
 ---
 

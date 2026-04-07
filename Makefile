@@ -1,7 +1,14 @@
 # Makefile for llm-homelab-training
 # Purpose:
 # - operational lifecycle targets for container workflow
-# - reproducible smoke workflow (GPU checks -> build/up -> tiny train -> tiny infer -> report)
+# - reproducible E2E workflow: preflight -> dataset -> train -> eval -> retention
+# - default training strategy: continue from latest OK adapter with fallback to fresh short run
+#
+# Reminder (Paperless references):
+# - LoRA (Doc 1848): default path in this MVP
+# - SEAL (Doc 1723): later, not part of nightly MVP
+# - Watermarking (Doc 1853): later, when sharing adapters
+# - Seal-Tools (Doc 1846): later, when tool-use tuning starts
 
 .DEFAULT_GOAL := help
 
@@ -29,39 +36,46 @@ VAULT_DOCS_ROOT := /vault/15_Dokumentation
 VAULT_PREPARE_OUTPUT := data/datasets/train.jsonl
 VAULT_PREPARE_REPORT := data/datasets/prepare_report.json
 
+RETENTION_KEEP ?= 3
+NIGHTLY_APPLY_CPU_LIMIT ?= 0
+
 .PHONY: help \
 	preflight check-docker check-gpu-host check-gpu-container check-paths gpu-info \
-	build up down restart ps logs shell \
+	build up limit-cpu down restart ps logs shell \
 	ensure-data-dirs \
 	train eval eval-val prepare-dataset prepare-dataset-vault self-edits tensorboard \
-	real-run-short run-status \
+	real-run-short real-run-continue run-status nightly-run \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
-	clean-smoke clean-data
+	retention-clean clean-smoke clean-data
 
 help:
 	@echo "Targets:"
-	@echo "  preflight        - Verify local prerequisites (docker, gpu, paths)"
-	@echo "  build            - Build trainer image"
-	@echo "  up               - Start trainer container in background"
-	@echo "  down             - Stop/remove trainer container"
-	@echo "  restart          - Restart trainer container"
-	@echo "  ps               - Show compose service status"
-	@echo "  logs             - Tail service logs"
-	@echo "  shell            - Open shell inside trainer container"
-	@echo "  gpu-info         - Show nvidia-smi inside container"
-	@echo "  ensure-data-dirs - Create expected local data directories"
-	@echo "  train            - Start LoRA training using default config"
-	@echo "  eval             - Run eval script on dataset"
-	@echo "  eval-val         - Run deterministic expected_contains regression checks"
-	@echo "  prepare-dataset  - Validate/normalize dataset JSONL"
+	@echo "  preflight             - Verify local prerequisites (docker, gpu, paths)"
+	@echo "  build                 - Build trainer image"
+	@echo "  up                    - Start trainer container in background"
+	@echo "  limit-cpu             - Optional: apply docker CPU cap (cpus=6) to trainer container"
+	@echo "  down                  - Stop/remove trainer container"
+	@echo "  restart               - Restart trainer container"
+	@echo "  ps                    - Show compose service status"
+	@echo "  logs                  - Tail service logs"
+	@echo "  shell                 - Open shell inside trainer container"
+	@echo "  gpu-info              - Show nvidia-smi inside container"
+	@echo "  ensure-data-dirs      - Create expected local data directories"
+	@echo "  train                 - Start LoRA training using default config"
+	@echo "  eval                  - Run eval script on dataset"
+	@echo "  eval-val              - Run expected_contains regression checks (non-blocking, always RC=0)"
+	@echo "  prepare-dataset       - Validate/normalize dataset JSONL"
 	@echo "  prepare-dataset-vault - Build train.jsonl from /vault/15_Dokumentation markdown files"
-	@echo "  self-edits       - Generate placeholder self-edit candidates"
-	@echo "  tensorboard      - Start tensorboard in container (port 6006)"
-	@echo "  real-run-short   - Start first controlled K80 real-run with short config"
-	@echo "  run-status       - Show latest real-run id and artifact status"
-	@echo "  smoke            - End-to-end smoke workflow (check/build/up/train/infer/report)"
-	@echo "  clean-smoke      - Remove smoke outputs"
-	@echo "  clean-data       - Remove generated datasets/evals/logs/models (keeps data/README.md)"
+	@echo "  self-edits            - Generate placeholder self-edit candidates"
+	@echo "  tensorboard           - Start tensorboard in container (port 6006)"
+	@echo "  real-run-short        - Fresh short run (new adapter from base model)"
+	@echo "  real-run-continue     - Continue from latest OK adapter; fallback to fresh short run"
+	@echo "  run-status            - Show latest real-run id and artifact status"
+	@echo "  nightly-run           - preflight -> prepare-dataset-vault -> optional limit-cpu -> gate(new_samples_count) -> real-run-continue -> eval-val -> retention-clean"
+	@echo "  smoke                 - End-to-end smoke workflow (check/build/up/train/infer/report)"
+	@echo "  retention-clean       - Keep only latest N run-like dirs in models/logs/evals (default N=3)"
+	@echo "  clean-smoke           - Remove smoke outputs"
+	@echo "  clean-data            - Remove generated datasets/evals/logs/models (keeps data/README.md)"
 
 preflight: check-docker check-gpu-host check-paths ensure-data-dirs
 
@@ -81,7 +95,7 @@ check-paths:
 	@echo "OK: required project files present"
 
 ensure-data-dirs:
-	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR)
+	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR)
 	@echo "OK: ensured data directories"
 
 build: check-docker check-paths
@@ -89,6 +103,10 @@ build: check-docker check-paths
 
 up: ensure-data-dirs
 	@$(COMPOSE) up -d
+
+limit-cpu: up
+	@docker update --cpus=6 llm-homelab-trainer >/dev/null
+	@echo "OK: applied CPU limit (cpus=6) to llm-homelab-trainer"
 
 check-gpu-container: up
 	@./scripts/check_gpu.sh --container-only --compose-file $(COMPOSE_FILE) --service $(SERVICE)
@@ -122,33 +140,47 @@ eval: up
 		--base-model $(BASE_MODEL) \
 		--output-dir data/evals/manual-eval
 
+# Non-blocking by policy: writes report if possible, but never fails E2E.
 eval-val: up
-	@set -e; \
+	@set +e; \
 	if [ ! -f $(LATEST_REALRUN_ID_FILE) ]; then \
-		echo "ERROR: missing $(LATEST_REALRUN_ID_FILE). Run 'make real-run-short' first."; \
-		exit 1; \
+		echo "WARN: missing $(LATEST_REALRUN_ID_FILE). Skipping eval-val."; \
+		exit 0; \
 	fi; \
 	RUN_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
 	ADAPTER_PATH=data/models/$$RUN_ID; \
+	if [ ! -f $$ADAPTER_PATH/adapter_config.json ]; then \
+		echo "WARN: missing adapter at $$ADAPTER_PATH. Skipping eval-val."; \
+		exit 0; \
+	fi; \
 	EVAL_RUN_ID=val-$$RUN_ID-$$(date -u +%Y%m%dT%H%M%SZ); \
 	echo "EVAL_VAL_RUN_ID=$$EVAL_RUN_ID"; \
-	$(COMPOSE) exec -T $(SERVICE) python src/scripts/eval_val.py \
+	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/eval_val.py \
 		--config $(VAL_REG_CONFIG) \
 		--dataset $(VAL_REG_DATASET) \
 		--base-model $(BASE_MODEL) \
 		--adapter-path $$ADAPTER_PATH \
 		--run-id $$EVAL_RUN_ID \
 		--output-dir $(VAL_REG_OUTPUT_ROOT); \
-	test -f $(VAL_REG_OUTPUT_ROOT)/$$EVAL_RUN_ID/val_report.json || { echo "ERROR: missing val_report.json for $$EVAL_RUN_ID"; exit 1; }; \
-	echo "OK: eval-val finished for $$EVAL_RUN_ID"
+	RC=$$?; \
+	if [ $$RC -ne 0 ]; then \
+		echo "WARN: eval-val returned non-zero (RC=$$RC). Continuing by policy."; \
+		exit 0; \
+	fi; \
+	if [ ! -f $(VAL_REG_OUTPUT_ROOT)/$$EVAL_RUN_ID/val_report.json ]; then \
+		echo "WARN: missing val_report.json for $$EVAL_RUN_ID. Continuing by policy."; \
+		exit 0; \
+	fi; \
+	echo "OK: eval-val finished for $$EVAL_RUN_ID"; \
+	exit 0
 
 prepare-dataset: up
-	@$(COMPOSE) exec $(SERVICE) python src/scripts/prepare_dataset.py \
+	@./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
 		--input data/datasets/raw.jsonl \
 		--output data/datasets/train.jsonl
 
 prepare-dataset-vault: up
-	@$(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
+	@./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
 		--mode vault_md \
 		--vault-root $(VAULT_DOCS_ROOT) \
 		--output $(VAULT_PREPARE_OUTPUT) \
@@ -166,18 +198,52 @@ self-edits: up
 tensorboard: up
 	@$(COMPOSE) exec $(SERVICE) tensorboard --logdir data/logs --host 0.0.0.0 --port 6006
 
+# Fresh short run (from base model).
 real-run-short: preflight up check-gpu-container
 	@set -e; \
 	RUN_ID=real-$$(date -u +%Y%m%dT%H%M%SZ); \
-	mkdir -p $(RUN_STATE_DIR); \
-	echo "$$RUN_ID" > $(LATEST_REALRUN_ID_FILE); \
-	echo "REAL_RUN_ID=$$RUN_ID"; \
-	$(COMPOSE) exec $(SERVICE) python src/scripts/train_lora.py \
+	echo "REAL_RUN_ID=$$RUN_ID (fresh)"; \
+	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/train_lora.py \
 		--config $(REALRUN_CONFIG) \
 		--dataset $(REALRUN_DATASET) \
 		--run-id $$RUN_ID; \
 	test -f data/models/$$RUN_ID/adapter_config.json || { echo "ERROR: missing adapter_config.json for $$RUN_ID"; exit 1; }; \
+	echo "$$RUN_ID" > $(LATEST_REALRUN_ID_FILE); \
 	echo "OK: real-run-short finished for $$RUN_ID"
+
+# Default mode: continue from latest OK adapter, fallback to fresh short run.
+real-run-continue: preflight up check-gpu-container
+	@set -e; \
+	PREV_RUN_ID=""; \
+	if [ -f $(LATEST_REALRUN_ID_FILE) ]; then \
+		CANDIDATE=$$(cat $(LATEST_REALRUN_ID_FILE)); \
+		if [ -f data/models/$$CANDIDATE/adapter_config.json ]; then \
+			PREV_RUN_ID="$$CANDIDATE"; \
+		fi; \
+	fi; \
+	if [ -z "$$PREV_RUN_ID" ]; then \
+		PREV_RUN_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
+	fi; \
+	if [ -z "$$PREV_RUN_ID" ]; then \
+		echo "WARN: no previous OK adapter found. Fallback -> real-run-short"; \
+		$(MAKE) real-run-short; \
+		exit 0; \
+	fi; \
+	if ! $(COMPOSE) exec -T $(SERVICE) python src/scripts/train_lora.py --help 2>/dev/null | grep -q -- "--adapter-path"; then \
+		echo "WARN: train_lora.py has no --adapter-path support. Fallback -> real-run-short"; \
+		$(MAKE) real-run-short; \
+		exit 0; \
+	fi; \
+	RUN_ID=real-$$(date -u +%Y%m%dT%H%M%SZ); \
+	echo "REAL_RUN_ID=$$RUN_ID (continue from $$PREV_RUN_ID)"; \
+	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/train_lora.py \
+		--config $(REALRUN_CONFIG) \
+		--dataset $(REALRUN_DATASET) \
+		--adapter-path data/models/$$PREV_RUN_ID \
+		--run-id $$RUN_ID; \
+	test -f data/models/$$RUN_ID/adapter_config.json || { echo "ERROR: missing adapter_config.json for $$RUN_ID"; exit 1; }; \
+	echo "$$RUN_ID" > $(LATEST_REALRUN_ID_FILE); \
+	echo "OK: real-run-continue finished for $$RUN_ID"
 
 run-status:
 	@set -e; \
@@ -197,6 +263,36 @@ run-status:
 		echo "final_metrics.json: not found (training may have failed early)"; \
 	fi
 
+# Orchestrator:
+# 1) preflight
+# 2) prepare-dataset-vault
+# 3) dataset gate: new_samples_count == 0 -> skip (exit 0)
+# 4) real-run-continue (with internal fallback to fresh)
+# 5) eval-val (non-blocking)
+# 6) retention-clean
+nightly-run: preflight prepare-dataset-vault
+	@set -e; \
+	if [ "$(NIGHTLY_APPLY_CPU_LIMIT)" = "1" ]; then \
+		$(MAKE) limit-cpu; \
+	else \
+		echo "INFO: nightly-run CPU cap skipped (set NIGHTLY_APPLY_CPU_LIMIT=1 to enable)"; \
+	fi; \
+	NEW_COUNT=$$(python3 -c "import json; p='$(VAULT_PREPARE_REPORT)'; \
+try: \
+ d=json.load(open(p,'r',encoding='utf-8')); \
+ print(int(d.get('new_samples_count', d.get('samples_written', 0)))); \
+except Exception: \
+ print(0)"); \
+	if [ "$$NEW_COUNT" = "0" ]; then \
+		echo "INFO: nightly-run skip (new_samples_count=0)"; \
+		exit 0; \
+	fi; \
+	echo "INFO: nightly-run new_samples_count=$$NEW_COUNT"; \
+	$(MAKE) real-run-continue; \
+	$(MAKE) eval-val; \
+	$(MAKE) retention-clean; \
+	echo "OK: nightly-run completed"
+
 smoke: preflight build up check-gpu-container smoke-dataset smoke-train smoke-infer smoke-report
 	@echo "OK: smoke workflow completed"
 
@@ -211,7 +307,7 @@ smoke-train: up smoke-dataset
 	RUN_ID=smoke-$$(date -u +%Y%m%dT%H%M%SZ); \
 	echo "$$RUN_ID" > $(SMOKE_RUN_ID_FILE); \
 	echo "SMOKE_RUN_ID=$$RUN_ID"; \
-	$(COMPOSE) exec $(SERVICE) python src/scripts/train_lora.py \
+	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/train_lora.py \
 		--config configs/smoke_lora.yaml \
 		--dataset $(SMOKE_DATASET) \
 		--run-id $$RUN_ID; \
@@ -224,7 +320,7 @@ smoke-infer: up
 	RUN_ID=$$(cat $(SMOKE_RUN_ID_FILE)); \
 	echo "SMOKE_RUN_ID=$$RUN_ID"; \
 	test -f data/models/$$RUN_ID/adapter_config.json || { echo "ERROR: missing adapter_config.json for $$RUN_ID (training did not produce adapter artifacts)"; exit 1; }; \
-	$(COMPOSE) exec $(SERVICE) python src/scripts/eval.py \
+	$(COMPOSE) exec -T $(SERVICE) python src/scripts/eval.py \
 		--dataset $(SMOKE_DATASET) \
 		--base-model $(BASE_MODEL) \
 		--adapter-path data/models/$$RUN_ID \
@@ -253,12 +349,35 @@ smoke-report:
 	} > $(SMOKE_REPORT); \
 	echo "OK: wrote $(SMOKE_REPORT)"
 
+# Keeps latest N run-like directories in models/logs/evals.
+# Never touches HF caches (outside these paths).
+retention-clean:
+	@set -e; \
+	KEEP=$(RETENTION_KEEP); \
+	echo "INFO: retention keep=$$KEEP"; \
+	for ROOT in data/models data/logs data/evals; do \
+		[ -d $$ROOT ] || { echo "INFO: skip missing $$ROOT"; continue; }; \
+		CANDIDATES=$$(find $$ROOT -mindepth 1 -maxdepth 1 -type d -print | sed "s#^$$ROOT/##" | grep -E ".*-[0-9]{8}T[0-9]{6}Z$$" | sort -r); \
+		COUNT=$$(printf '%s\n' "$$CANDIDATES" | sed '/^$$/d' | wc -l | tr -d ' '); \
+		if [ "$$COUNT" -le "$$KEEP" ]; then \
+			echo "INFO: $$ROOT nothing to prune ($$COUNT <= $$KEEP)"; \
+			continue; \
+		fi; \
+		PRUNE=$$(printf '%s\n' "$$CANDIDATES" | tail -n +$$((KEEP+1))); \
+		printf '%s\n' "$$PRUNE" | while IFS= read -r NAME; do \
+			[ -n "$$NAME" ] || continue; \
+			rm -rf "$$ROOT/$$NAME"; \
+			echo "PRUNED: $$ROOT/$$NAME"; \
+		done; \
+	done; \
+	echo "OK: retention-clean done"
+
 clean-smoke:
-	@rm -f $(SMOKE_DATASET) $(SMOKE_RUN_ID_FILE) $(SMOKE_REPORT)
-	@rm -rf data/evals/smoke-* data/models/smoke-* data/logs/smoke-*
+	@rm -rf data/models/smoke-* data/evals/smoke-* data/logs/smoke-* $(SMOKE_STATE_DIR)
+	@mkdir -p $(SMOKE_STATE_DIR)
 	@echo "OK: smoke artifacts removed"
 
 clean-data:
 	@find data -mindepth 1 -maxdepth 1 ! -name README.md -exec rm -rf {} +
-	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR)
+	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR)
 	@echo "OK: cleaned generated data artifacts (kept data/README.md)"

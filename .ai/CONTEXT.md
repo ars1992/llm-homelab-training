@@ -10,6 +10,7 @@ Der aktuelle Fokus ist ein stabiler MVP-Trainingspfad; darauf aufbauend folgt ei
 - Konfigurationsgetriebene Ausführung
 - Trennung von Code, Konfiguration und Laufzeitartefakten
 - Keine Secrets im Repository
+- Host-freundlicher Laufmodus für schwere Schritte (CPU/I/O priorisiert, E2E bleibt lauffähig)
 
 ## Ordner-Overview
 - `docker/`  
@@ -76,16 +77,19 @@ Der Smoke-Workflow führt deterministisch aus:
 
 ### Manueller Trainingslauf (MVP)
 
-6. In den Trainer-Container:
-`docker compose -f docker/compose.yaml exec trainer bash`
+6. Standardpfad (host-freundlich, empfohlen):
+`make real-run-short` oder `make real-run-continue`
 
-7. Training starten:
+7. Optional direkter Container-Start (nur bei gezieltem Debugging):
+`docker compose -f docker/compose.yaml exec trainer bash`
 `python src/scripts/train_lora.py --config configs/train_lora_3b_k80.yaml --dataset data/datasets/train.jsonl`
 
 8. Logs ansehen (TensorBoard):
 `tensorboard --logdir data/logs --host 0.0.0.0 --port 6006`
 
-9. Optional stoppen:
+9. Status/Audit prüfen und optional stoppen:
+`make run-status`
+`make eval-val`
 `make down`
 
 ## Output-Konventionen
@@ -96,9 +100,16 @@ Der Smoke-Workflow führt deterministisch aus:
 
 ## Hinweise zu K80
 - Kleine Batchgrößen verwenden
-- Gradient Accumulation erhöhen
-- `max_seq_length` konservativ halten
-- Bei OOM zuerst Sequenzlänge reduzieren, dann weitere Parameter anpassen
+- `max_seq_length` konservativ halten (Default: `384`, bei weiterem Speicher-/Swap-Druck auf `256`)
+- `gradient_accumulation_steps` erhöht halten (Default-Pfad: `24`)
+- Tokenisierung/Loader konservativ parallelisieren (`num_proc=1`, kleine Worker-Zahlen)
+- Schwere Schritte über host-freundlichen Laufmodus ausführen (`scripts/run_nice.sh` via Make-Targets)
+
+### Swap-Thrash Mitigation (verbindliche Reihenfolge)
+1. Sequenzlänge reduzieren (`512 -> 384 -> 256`)
+2. Danach `gradient_accumulation_steps` erhöhen/anpassen (`16 -> 24/32`) für stabileres Signal
+3. Tokenisierungs-Parallelität niedrig halten (`num_proc=1`)
+4. Erst danach weitere Hyperparameter ändern
 
 ## Meilensteinstatus (aktuell)
 - Container CUDA Validierung erfolgreich abgeschlossen:
@@ -220,6 +231,9 @@ Nach jedem Real-Run dokumentieren:
 - Workflow:
   1. `make up`
   2. `make prepare-dataset-vault`
+- Betriebsmodus:
+  - Ausführung host-freundlich über `scripts/run_nice.sh` (nice/ionice)
+  - Vor/Nachlauf-Quickfacts werden protokolliert (Zeit, Uptime, Mem/Swap, Disk)
 - Zielartefakte:
   - Trainingsdataset: `data/datasets/train.jsonl`
   - Laufbericht: `data/datasets/prepare_report.json`
@@ -237,6 +251,15 @@ Nach jedem Real-Run dokumentieren:
   - Anzahl Sections gescannt
   - Anzahl Samples geschrieben
   - Top-Skip-Gründe
+
+## Host-freundlicher Laufmodus (neu, Betriebsstandard)
+- Schwere Make-Targets laufen prioritätsgesenkt, um Host-Bedienbarkeit zu erhalten:
+  - `prepare-dataset-vault`
+  - `real-run-short`
+  - `real-run-continue`
+  - `prepare-dataset` / `smoke-train` / `eval-val` (ebenfalls priorisiert)
+- Optionaler CPU-Cap verfügbar: `make limit-cpu` (Container-Update auf feste CPU-Obergrenze)
+- Memory-Pressure wird als Warnsignal geführt (nicht blockierend), OOM-Diagnostik erfolgt best-effort bei Fehlern.
 
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

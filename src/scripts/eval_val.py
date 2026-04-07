@@ -67,14 +67,8 @@ def build_prompt(instruction: str, input_text: str) -> str:
     instruction = instruction.strip()
     input_text = (input_text or "").strip()
     if input_text:
-        return (
-            "### Instruction:\n"
-            f"{instruction}\n\n"
-            "### Input:\n"
-            f"{input_text}\n\n"
-            "### Response:\n"
-        )
-    return f"### Instruction:\n{instruction}\n\n### Response:\n"
+        return f"{instruction}\n\nKontext:\n{input_text}\n\nAntwort:\n"
+    return f"{instruction}\n\nAntwort:\n"
 
 
 def normalize_text(
@@ -213,6 +207,7 @@ def evaluate_contains(
     trim_whitespace: bool,
     tags: Optional[List[str]] = None,
     exact_tag: str = "exact",
+    no_prompt_echo_tag: str = "no_prompt_echo",
 ) -> Tuple[bool, List[str]]:
     pred_norm = normalize_text(
         prediction,
@@ -231,6 +226,14 @@ def evaluate_contains(
     tag_set = {
         t.strip().lower() for t in (tags or []) if isinstance(t, str) and t.strip()
     }
+
+    # Optional anti-echo guard:
+    # fail if prediction leaks prompt markers.
+    if no_prompt_echo_tag.strip().lower() in tag_set:
+        pred_lower = prediction.lower()
+        prompt_markers = ["instruction:", "input:", "###"]
+        if any(marker in pred_lower for marker in prompt_markers):
+            return False, ["__prompt_echo__"]
 
     # Exact mode by tag:
     # if tags contains "exact", prediction must match one expected token exactly.

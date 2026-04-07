@@ -98,6 +98,12 @@ Nicht entschieden in dieser ADR:
 3. `expected_contains` enthält pro Item 1–3 kurze, prüfbare Substrings.
 4. Vor Merge in `main` soll `make eval-val` ausführbar sein und Report erzeugen.
 5. Große Trainingsdaten bleiben standardmäßig außerhalb des Repos oder explizit ignoriert.
+6. Für ressourcenintensive Schritte gilt ein host-freundlicher Ausführungsmodus:
+   - `make prepare-dataset-vault` und `make eval-val` sollen prioritätsgesenkt ausgeführt werden (`nice`/`ionice` über den Projekt-Wrapper).
+   - Ziel: Host-Bedienbarkeit erhalten; längere Laufzeit ist akzeptiert.
+7. Operative Beobachtbarkeit ist verpflichtend:
+   - Vor/Nachlauf-Snapshots für `MemAvailable`, `SwapTotal`, `SwapFree` und `df -h /` erfassen.
+   - Bei Fehlschlag OOM-Indizien best-effort protokollieren (`oom|out of memory|killed process`).
 
 ---
 
@@ -107,6 +113,7 @@ Nicht entschieden in dieser ADR:
 - Dataset-Config: `configs/datasets/val_regression.yaml`
 - Evaluator: `src/scripts/eval_val.py`
 - Build/Run Target: `make eval-val`
+- Host-freundlicher Wrapper: `scripts/run_nice.sh`
 - Ignore-Regeln: `.gitignore`
 - Externe Doku-Referenzen (nur Verweis):
   - `ADR_Trainingsdaten_im_llm-homelab-training_repo_2026-04-06`

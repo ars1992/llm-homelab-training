@@ -225,6 +225,26 @@ Hinweise:
   - `seq_len` reduzieren
   - Gradient Checkpointing aktivieren
 
+### Swap-Thrash Mitigation (Quickstart, verbindliche Reihenfolge)
+
+Wenn der Host während Dataset-Prep oder Training unbedienbar wird, gilt folgende Reihenfolge:
+
+1. **`max_seq_length` zuerst reduzieren** (wichtigster Hebel):
+   - Standardpfad: `512 -> 384`
+   - Bei weiterem Swap-Druck: `384 -> 256`
+2. **`gradient_accumulation_steps` erhöhen**, um bei kürzerer Sequenzlänge ein stabiles Trainingssignal zu halten
+   (z. B. `16 -> 24` oder `32`).
+3. **Tokenisierungs-Parallelität niedrig halten** (`num_proc: 1`, kleine `dataloader_num_workers`), um RAM-Peaks zu vermeiden.
+4. **Schwere Targets mit niedriger Priorität ausführen** (host-freundlicher Laufmodus über `run_nice`).
+5. **Mem/Swap vor und nach Lauf prüfen**:
+   - `free -h`
+   - `grep -E 'MemAvailable|SwapTotal|SwapFree' /proc/meminfo`
+   - `df -h /`
+
+Hinweis:
+- Diese Maßnahmen priorisieren Host-Stabilität und Bedienbarkeit.
+- Der Lauf kann dadurch langsamer werden; das ist erwartetes Verhalten.
+
 ### Verbindliche Legacy-GPU Baseline (frozen)
 
 Für dieses Projekt ist eine feste, stabile GPU-Software-Baseline definiert:

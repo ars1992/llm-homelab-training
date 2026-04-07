@@ -711,6 +711,9 @@ def main() -> None:
         "files_scanned": summary.files_scanned,
         "sections_scanned": summary.sections_scanned,
         "samples_written": summary.samples_written,
+        "new_samples_count": summary.samples_written
+        if summary.mode == "vault_md"
+        else 0,
         "skip_reasons": summary.skip_reasons or {},
         "issues": [{"line_no": i.line_no, "reason": i.reason} for i in summary.issues],
     }

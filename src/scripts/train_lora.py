@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import yaml
 from datasets import Dataset, load_dataset
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -42,6 +42,7 @@ DEFAULTS: Dict[str, Any] = {
     "model_name": "facebook/opt-2.7b",
     "dataset_path": "data/datasets/train.jsonl",
     "eval_dataset_path": None,
+    "adapter_path": None,
     "output_root": "data/models",
     "logs_root": "data/logs",
     "run_id": None,
@@ -67,6 +68,8 @@ DEFAULTS: Dict[str, Any] = {
     "max_steps": -1,
     "optim": "adamw_torch",
     "dataloader_num_workers": 0,
+    "tokenization_num_proc": 1,
+    "tokenization_batch_size": 64,
     "lora_r": 8,
     "lora_alpha": 16,
     "lora_dropout": 0.05,
@@ -157,6 +160,8 @@ def apply_yaml_config(
     _set_if_present(cfg, model, "base_model_name", "model_name")
 
     _set_if_present(cfg, data, "max_seq_length", "max_seq_length")
+    _set_if_present(cfg, data, "num_proc", "tokenization_num_proc")
+    _set_if_present(cfg, data, "map_batch_size", "tokenization_batch_size")
 
     _set_if_present(cfg, lora, "r", "lora_r")
     _set_if_present(cfg, lora, "alpha", "lora_alpha")
@@ -209,6 +214,8 @@ def validate_effective_config(cfg: Dict[str, Any]) -> None:
         "eval_steps",
         "max_steps",
         "dataloader_num_workers",
+        "tokenization_num_proc",
+        "tokenization_batch_size",
         "lora_r",
         "lora_alpha",
     ]
@@ -246,6 +253,10 @@ def validate_effective_config(cfg: Dict[str, Any]) -> None:
         raise ValueError("eval_batch_size must be > 0")
     if cfg["gradient_accumulation_steps"] <= 0:
         raise ValueError("gradient_accumulation_steps must be > 0")
+    if cfg["tokenization_num_proc"] <= 0:
+        raise ValueError("tokenization_num_proc must be > 0")
+    if cfg["tokenization_batch_size"] <= 0:
+        raise ValueError("tokenization_batch_size must be > 0")
     if not cfg.get("model_name"):
         raise ValueError("model_name must not be empty")
     if not cfg.get("dataset_path"):
@@ -333,6 +344,8 @@ def tokenize_dataset(
     ds: Dataset,
     tokenizer: AutoTokenizer,
     max_seq_length: int,
+    num_proc: int = 1,
+    map_batch_size: int = 64,
 ) -> Dataset:
     def _map_fn(batch: Dict[str, List[Any]]) -> Dict[str, Any]:
         texts = []
@@ -357,6 +370,8 @@ def tokenize_dataset(
     ds_tok = ds.map(
         _map_fn,
         batched=True,
+        batch_size=max(1, int(map_batch_size)),
+        num_proc=max(1, int(num_proc)),
         remove_columns=keep_cols,
         desc="Tokenizing dataset",
     )
@@ -426,6 +441,12 @@ def parse_args() -> argparse.Namespace:
         "--model-name", type=str, default=None, help="Override model_name from config"
     )
     p.add_argument(
+        "--adapter-path",
+        type=str,
+        default=None,
+        help="Optional adapter path for continue-training start point",
+    )
+    p.add_argument(
         "--run-id",
         type=str,
         default=None,
@@ -454,6 +475,8 @@ def build_config(args: argparse.Namespace) -> Dict[str, Any]:
         cfg["eval_dataset_path"] = args.eval_dataset
     if args.model_name:
         cfg["model_name"] = args.model_name
+    if args.adapter_path:
+        cfg["adapter_path"] = args.adapter_path
     if args.run_id:
         cfg["run_id"] = args.run_id
     if args.max_seq_length is not None:
@@ -517,6 +540,8 @@ def main() -> None:
     print(f"[INFO] Logs dir: {run_paths.logs_dir}")
     print(f"[INFO] Base model: {cfg['model_name']}")
     print(f"[INFO] Train dataset: {train_path}")
+    if cfg.get("adapter_path"):
+        print(f"[INFO] Continue adapter path: {cfg['adapter_path']}")
     if eval_path:
         print(f"[INFO] Eval dataset: {eval_path}")
 
@@ -533,15 +558,26 @@ def main() -> None:
     # Important for some causal LMs with gradient checkpointing
     model.config.use_cache = False
 
-    lora_cfg = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        r=int(cfg["lora_r"]),
-        lora_alpha=int(cfg["lora_alpha"]),
-        lora_dropout=float(cfg["lora_dropout"]),
-        bias=str(cfg.get("lora_bias", "none")),
-        target_modules=cfg["target_modules"],
-    )
-    model = get_peft_model(model, lora_cfg)
+    adapter_path = cfg.get("adapter_path")
+    if adapter_path:
+        adapter_dir = Path(str(adapter_path))
+        if not adapter_dir.exists():
+            raise FileNotFoundError(f"Adapter path does not exist: {adapter_dir}")
+        model = PeftModel.from_pretrained(
+            model,
+            str(adapter_dir),
+            is_trainable=True,
+        )
+    else:
+        lora_cfg = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            r=int(cfg["lora_r"]),
+            lora_alpha=int(cfg["lora_alpha"]),
+            lora_dropout=float(cfg["lora_dropout"]),
+            bias=str(cfg.get("lora_bias", "none")),
+            target_modules=cfg["target_modules"],
+        )
+        model = get_peft_model(model, lora_cfg)
 
     # Required for some model/torch combinations when using gradient checkpointing + LoRA.
     # Without this, backward can fail with:
@@ -566,6 +602,8 @@ def main() -> None:
         ds=raw["train"],
         tokenizer=tokenizer,
         max_seq_length=int(cfg["max_seq_length"]),
+        num_proc=int(cfg.get("tokenization_num_proc", 1)),
+        map_batch_size=int(cfg.get("tokenization_batch_size", 64)),
     )
     eval_ds = None
     if "validation" in raw:
@@ -573,6 +611,8 @@ def main() -> None:
             ds=raw["validation"],
             tokenizer=tokenizer,
             max_seq_length=int(cfg["max_seq_length"]),
+            num_proc=int(cfg.get("tokenization_num_proc", 1)),
+            map_batch_size=int(cfg.get("tokenization_batch_size", 64)),
         )
 
     precision = choose_precision(cfg)

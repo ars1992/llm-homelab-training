@@ -309,3 +309,46 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - wiederkehrende OOM-/Runtime-Fehler ohne dokumentierte Einzeländerung
     - Prozessregel:
       - Pro Wiederholungslauf nur eine Parameteränderung und vollständige Dokumentation mit `run_id`.
+
+- 2026-04-07 (Host-freundlicher Laufmodus / Soft-Limits):
+  - Zielbild aktualisiert:
+    - Schwere Schritte (`prepare-dataset-vault`, `real-run-short`, `real-run-continue`) sollen den Host weniger belasten, E2E aber unverändert lauffähig bleiben.
+  - Umgesetzte Betriebsmaßnahme:
+    - Wrapper `scripts/run_nice.sh` eingeführt und ausführbar gemacht.
+    - Wrapper nutzt weiche Priorisierung:
+      - CPU: `nice -n 10`
+      - I/O: `ionice -c2 -n7` (wenn verfügbar)
+    - Wrapper protokolliert vor/nach dem Lauf:
+      - UTC-Zeitstempel
+      - Uptime
+      - Speicher-Schnappschuss
+      - Disk-Schnappschuss (`/`)
+  - Memory-Pressure-Warnung (nicht-blockierend):
+    - Schwelle `MemAvailable < 1536MB` erzeugt Warnung, aber keinen harten Abbruch.
+  - Fehlerdiagnostik bei Fehlschlag:
+    - Best-effort OOM-Dump aus Kernel-Logs (`oom|out of memory|killed process`) wird ausgegeben.
+  - Makefile-Workflow angepasst:
+    - `prepare-dataset-vault` läuft über `./scripts/run_nice.sh ...`
+    - `real-run-short` läuft über `./scripts/run_nice.sh ...`
+    - `real-run-continue` läuft über `./scripts/run_nice.sh ...`
+    - Optionales Target `limit-cpu` ergänzt (`docker update --cpus=6 llm-homelab-trainer`)
+    - `nightly-run` kann CPU-Cap optional aktivieren über `NIGHTLY_APPLY_CPU_LIMIT=1`
+  - Audit-Hinweis:
+    - Änderung ist Betriebs-/Stabilitätsmaßnahme (Host-Responsiveness), keine Qualitätsoptimierung des Modells.
+    - E2E-Prinzip bleibt unverändert: `preflight -> dataset -> train -> eval -> retention`.
+
+- 2026-04-07 (Swap-Thrash Mitigation / SeqLen-First, verbindliche Reihenfolge):
+  - Zielbild:
+    - Training und Dataset-Preparation sollen Host-Bedienbarkeit priorisieren (kein Swap-Thrash), auch wenn Läufe langsamer werden.
+  - Verbindliche Reihenfolge bei Speicher-/Swap-Druck:
+    - 1) `max_seq_length` zuerst reduzieren (`512 -> 384`, bei Bedarf `384 -> 256`).
+    - 2) Danach `gradient_accumulation_steps` erhöhen (z. B. `16 -> 24/32`) zur Stabilisierung des Trainingssignals.
+    - 3) Tokenisierungs-Parallelität niedrig halten (`num_proc=1`) und kleine Tokenize-Batches verwenden, um RAM-Peaks zu reduzieren.
+  - Umgesetzte technische Maßnahmen:
+    - `configs/train_lora_3b_k80.yaml`: `max_seq_length=384`, `gradient_accumulation_steps=24`, `data.num_proc=1`, `dataloader_num_workers=1`.
+    - `configs/train_lora_3b_k80_short.yaml`: `gradient_accumulation_steps=24` (bei konservativem `max_seq_length=384`).
+    - `src/scripts/train_lora.py`: Tokenisierung konfigurierbar über `tokenization_num_proc` und `tokenization_batch_size` (RAM-Peak-Minderung).
+  - Observability-Anforderung:
+    - Vor-/Nachlauf-Snapshots verpflichtend mit Fokus auf `MemAvailable`, `SwapTotal`, `SwapFree` plus `free -h` und `df -h /`.
+  - Prozessregel:
+    - Erst wenn SeqLen-/Tokenisierungshebel ausgereizt sind, weitere Optimierungen prüfen.

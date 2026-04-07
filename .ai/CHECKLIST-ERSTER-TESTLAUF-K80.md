@@ -2,8 +2,8 @@
 
 ## Dokumentkontrolle
 - Status: Verbindlich
-- Version: 1.0
-- Datum: 2026-04-05
+- Version: 1.1
+- Datum: 2026-04-07
 - Geltungsbereich: `llm-homelab-training` auf Host mit NVIDIA Tesla K80
 - Priorität: Reproduzierbarkeit und Stabilität vor Performance
 
@@ -40,6 +40,12 @@ Vor jedem Lauf bestätigen:
 - [ ] Docker/Compose nicht verfügbar
 - [ ] Pflichtdateien fehlen
 
+### 2.4 Host-Speicher-/Swap-Baseline vor Heavy Steps (Pflicht für Diagnose)
+- [ ] `free -h`
+- [ ] `grep -E 'MemAvailable|SwapTotal|SwapFree' /proc/meminfo`
+- [ ] `df -h /`
+- [ ] Werte im Run-Protokoll notieren (vor/nach Run vergleichbar)
+
 ---
 
 ## 3) Container Runtime + GPU (Pflicht-Gate)
@@ -47,6 +53,10 @@ Vor jedem Lauf bestätigen:
 ### 3.1 Build und Start
 - [ ] `make build`
 - [ ] `make up`
+- [ ] Optional bei Host-Druck: `make limit-cpu` (setzt Container-CPU-Limit)
+
+Hinweis:
+- Schwere Targets laufen standardmäßig host-freundlich über `scripts/run_nice.sh` (nice/ionice), wenn sie über `make` gestartet werden.
 
 ### 3.2 Container-GPU
 - [ ] `make check-gpu-container`
@@ -99,14 +109,18 @@ Vor jedem Lauf bestätigen:
 ## 6) Erster kurzer Real-Run (kontrolliert)
 
 ### 6.1 Konservative Konfiguration prüfen
-- [ ] Config: `configs/train_lora_3b_k80.yaml`
+- [ ] Config: `configs/train_lora_3b_k80.yaml` (oder Kurzlauf: `configs/train_lora_3b_k80_short.yaml`)
 - [ ] `per_device_train_batch_size = 1`
 - [ ] `fp16 = true`, `bf16 = false`
 - [ ] `gradient_checkpointing = true`
-- [ ] `max_seq_length` konservativ (bei OOM: 512 -> 384 -> 256)
+- [ ] **SeqLen-first-Regel:** `max_seq_length` zuerst reduzieren (`512 -> 384 -> 256`)
+- [ ] Bei kürzerer Sequenzlänge: `gradient_accumulation_steps` bei Bedarf erhöhen (`16 -> 24/32`)
+- [ ] Tokenisierung konservativ: `data.num_proc = 1` (RAM-Peaks reduzieren)
 
 ### 6.2 Training starten
-- [ ] `python src/scripts/train_lora.py --config configs/train_lora_3b_k80.yaml --dataset data/datasets/train.jsonl`
+- [ ] Fresh: `make real-run-short`
+- [ ] Continue (Default-Pfad): `make real-run-continue`
+- [ ] Hinweis: beide Targets laufen über `run_nice` mit Host-Schonung.
 
 ### 6.3 Ergebnis prüfen
 - [ ] Adapter unter `data/models/<run-id>/`
@@ -127,11 +141,14 @@ Vor jedem Lauf bestätigen:
 ## 8) Reaktionsregeln bei Fehlern
 
 - [ ] Pro Wiederholungsrun nur **einen** Parameter ändern
-- [ ] OOM-Reihenfolge strikt einhalten:
-  1. `max_seq_length` senken
-  2. danach `gradient_accumulation_steps` erhöhen
-  3. erst danach weitere Hyperparameter prüfen
+- [ ] OOM-/Swap-Reihenfolge strikt einhalten (**seq_len first**):
+  1. `max_seq_length` senken (`512 -> 384`, falls nötig `384 -> 256`)
+  2. danach `gradient_accumulation_steps` erhöhen (`16 -> 24/32`)
+  3. Tokenisierung/Dataloader parallelität niedrig halten (`num_proc=1`, kleine Worker-Zahl)
+  4. erst danach weitere Hyperparameter prüfen
 - [ ] Treiber/CUDA nicht anfassen
+- [ ] Bei Fehlschlag OOM-Indizien prüfen (best effort):
+  - `dmesg -T | egrep -i 'oom|out of memory|killed process' | tail -n 50`
 - [ ] Fehlerklasse dokumentieren (GPU, Daten, Runtime, Modellzugriff)
 
 ---
@@ -157,6 +174,10 @@ Vor jedem Lauf bestätigen:
 - Dataset: __________________
 - Config: __________________
 - Run-ID: __________________
+- MemAvailable vor Run: __________________
+- SwapTotal/SwapFree vor Run: __________________
+- MemAvailable nach Run: __________________
+- SwapTotal/SwapFree nach Run: __________________
 - Ergebnis: [ ] success  [ ] failed
 - Fehlerklasse (falls failed): __________________
 - Nächste Maßnahme: __________________

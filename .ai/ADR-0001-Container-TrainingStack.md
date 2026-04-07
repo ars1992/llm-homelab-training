@@ -18,6 +18,7 @@ Randbedingungen:
 3. Die Umgebung muss interaktiv und iterativ nutzbar sein (Debugging, Training, Evaluation im selben Container-Workflow).
 4. Keine Secrets im Repository.
 5. Abhängigkeiten müssen deterministisch installierbar sein.
+6. Host-Bedienbarkeit unter Last ist ein Betriebsziel (keine vermeidbare CPU-/I/O-Verdrängung durch Trainings- oder Dataset-Prepare-Schritte).
 
 ---
 
@@ -59,14 +60,26 @@ Beispielprinzip:
 - GPU-Passthrough (`gpus: all`) plus NVIDIA/CUDA-Umgebungsvariablen
 - Default-Command als langlebiger Interaktivmodus (`sleep infinity`)
 
-### 2.4 Optionalkomponenten
+### 2.4 Host-Responsiveness-Policy (Runtime-Priorisierung)
+
+Schwere Schritte werden standardmäßig mit abgesenkter Host-Priorität ausgeführt (weiche Limits):
+
+1. CPU-Priorität reduziert (`nice`, bevorzugt `+10`)
+2. I/O-Priorität reduziert (`ionice`, bevorzugt Best-Effort Klasse 2, Priorität 7)
+3. Vor-/Nachlauf-Snapshots für Speicher/Swap und Root-Filesystem erfassen (Audit/Diagnose)
+
+Ziel:
+- Host bleibt bedienbar (z. B. SSH/Interaktion), auch wenn Laufzeit steigt.
+- E2E-Fähigkeit bleibt erhalten (kein Funktionsverlust durch Priorisierung).
+
+### 2.5 Optionalkomponenten
 
 `bitsandbytes` wird **nicht** als Standardabhängigkeit erzwungen, sondern nur optional dokumentiert.  
 Grund: Kompatibilitätsrisiken auf älterer GPU-/Treiberkombination.
 
 ---
 
-### 2.5 Verifizierte Kompatibilitätsentscheidung (K80 / Driver 470)
+### 2.6 Verifizierte Kompatibilitätsentscheidung (K80 / Driver 470)
 
 Im Betrieb wurde folgender Fehler reproduzierbar beobachtet:
 
@@ -107,6 +120,17 @@ Ein Update von Base-Image oder Kernpaketen ist nur zulässig mit:
    - CUDA in PyTorch verfügbar
    - mindestens ein kurzer Trainingslauf startbar
 
+### 3.4 Memory-/Swap-Mitigation-Policy (seq_len first)
+
+Für K80-Läufe gilt bei Speicher- oder Swap-Druck verbindlich:
+
+1. **Zuerst** `max_seq_length` reduzieren (Standardpfad: `512 -> 384`, bei weiterem Druck `384 -> 256`).
+2. Danach `gradient_accumulation_steps` erhöhen (`16 -> 24/32`) zur Stabilisierung des Trainingssignals bei kürzeren Sequenzen.
+3. Tokenisierungs- und Loader-Parallelität konservativ halten (`num_proc=1`, geringe Worker-Zahl), um Host-RAM-Peaks zu begrenzen.
+4. Erst danach weitere Hyperparameter ändern.
+
+Diese Reihenfolge ist Teil der Betriebsdisziplin und dient der Host-Stabilität, nicht primär der Trainingsgeschwindigkeit.
+
 ---
 
 ## 4. Begründung (Trade-offs)
@@ -133,6 +157,8 @@ Ein Update von Base-Image oder Kernpaketen ist nur zulässig mit:
 2. Neue Features, die Pinning oder K80-Stabilität gefährden, sind nachrangig.
 3. Experimente mit optionalen Komponenten (z. B. Quantisierungspakete) erfolgen isoliert und standardmäßig deaktiviert.
 4. Fehlerdiagnose priorisiert zunächst **Kompatibilitätsschicht** (Driver/CUDA/PyTorch), dann Hyperparameter.
+5. Host-Bedienbarkeit ist ein explizites Betriebskriterium; reduzierte Priorität für schwere Schritte ist Standard, auch bei längeren Laufzeiten.
+6. Bei Speicher-/Swap-Problemen gilt die feste Reihenfolge „seq_len first“, um deterministisch und auditierbar zu reagieren.
 
 ---
 
@@ -176,6 +202,9 @@ Vor Freigabe eines Stack-Updates:
 3. `torch.cuda.is_available()` liefert `True`
 4. Kurzlauf von `train_lora.py` startet ohne Stack-Fehler
 5. Logs und Outputs landen in den definierten Pfaden unter `data/`
+6. Schwere Schritte laufen mit abgesenkter Host-Priorität (CPU/I/O), ohne E2E-Funktionsverlust
+7. Speicher-/Swap-Snapshots vor/nach Lauf sind nachvollziehbar dokumentiert (`MemAvailable`, `SwapTotal`, `SwapFree`)
+8. Bei Fehlschlag sind OOM-Indizien (Kernel-Logs, best effort) geprüft und protokolliert
 
 ---
 

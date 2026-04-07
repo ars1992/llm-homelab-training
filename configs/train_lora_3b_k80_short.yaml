@@ -5,94 +5,94 @@
 # - preserve reproducibility and auditability
 
 run:
-  run_id: ""
-  run_id_prefix: "lora-3b-k80-short"
-  seed: 42
+    run_id: ""
+    run_id_prefix: "lora-3b-k80-short"
+    seed: 42
 
 paths:
-  dataset_jsonl: "data/datasets/train.jsonl"
-  model_output_root: "data/models"
-  log_output_root: "data/logs"
+    dataset_jsonl: "data/datasets/train.jsonl"
+    model_output_root: "data/models"
+    log_output_root: "data/logs"
 
 model:
-  base_model_name: "facebook/opt-2.7b"
-  trust_remote_code: false
-  use_fast_tokenizer: true
+    base_model_name: "facebook/opt-2.7b"
+    trust_remote_code: false
+    use_fast_tokenizer: true
 
 data:
-  format: "instruction_input_output_jsonl"
-  text_template_with_input: |
-    ### Instruction:
-    {instruction}
+    format: "instruction_input_output_jsonl"
+    text_template_with_input: |
+        ### Instruction:
+        {instruction}
 
-    ### Input:
-    {input}
+        ### Input:
+        {input}
 
-    ### Response:
-    {output}
-  text_template_no_input: |
-    ### Instruction:
-    {instruction}
+        ### Response:
+        {output}
+    text_template_no_input: |
+        ### Instruction:
+        {instruction}
 
-    ### Response:
-    {output}
-  # Conservative for K80 first real run
-  max_seq_length: 384
-  truncation: true
-  packing: false
-  num_proc: 1
+        ### Response:
+        {output}
+    # Conservative for K80 first real run
+    max_seq_length: 384
+    truncation: true
+    packing: false
+    num_proc: 1
 
 lora:
-  task_type: "CAUSAL_LM"
-  r: 8
-  alpha: 16
-  dropout: 0.05
-  bias: "none"
-  target_modules:
-    - "q_proj"
-    - "k_proj"
-    - "v_proj"
-    - "o_proj"
+    task_type: "CAUSAL_LM"
+    r: 8
+    alpha: 16
+    dropout: 0.05
+    bias: "none"
+    target_modules:
+        - "q_proj"
+        - "k_proj"
+        - "v_proj"
+        - "o_proj"
 
 training:
-  # Short controlled run
-  num_train_epochs: 1
-  max_steps: 60
+    # Short controlled run
+    num_train_epochs: 1
+    max_steps: 60
 
-  per_device_train_batch_size: 1
-  per_device_eval_batch_size: 1
-  gradient_accumulation_steps: 16
+    per_device_train_batch_size: 1
+    per_device_eval_batch_size: 1
+    gradient_accumulation_steps: 24
 
-  learning_rate: 0.0002
-  lr_scheduler_type: "cosine"
-  warmup_ratio: 0.03
-  weight_decay: 0.0
-  max_grad_norm: 1.0
+    learning_rate: 0.0002
+    lr_scheduler_type: "cosine"
+    warmup_ratio: 0.03
+    weight_decay: 0.0
+    max_grad_norm: 1.0
 
-  fp16: true
-  bf16: false
-  tf32: false
+    fp16: true
+    bf16: false
+    tf32: false
 
-  gradient_checkpointing: true
-  optim: "adamw_torch"
-  dataloader_num_workers: 0
+    gradient_checkpointing: true
+    optim: "adamw_torch"
+    dataloader_num_workers: 0
 
-  logging_steps: 5
-  save_steps: 30
-  save_total_limit: 2
-  evaluation_strategy: "no"
+    logging_steps: 5
+    save_steps: 30
+    save_total_limit: 2
+    evaluation_strategy: "no"
 
-  group_by_length: true
-  remove_unused_columns: false
-  report_to:
-    - "tensorboard"
+    group_by_length: true
+    remove_unused_columns: false
+    report_to:
+        - "tensorboard"
 
 hardware:
-  expected_gpu: "NVIDIA Tesla K80"
-  cuda_visible_devices: "0"
-  nvidia_visible_devices: "all"
+    expected_gpu: "NVIDIA Tesla K80"
+    cuda_visible_devices: "0"
+    nvidia_visible_devices: "all"
 
 notes:
-  - "First real-run validation config: short, low-risk, reproducible."
-  - "If OOM occurs, reduce max_seq_length to 256 before changing other parameters."
-  - "If unstable loss appears, lower learning_rate to 1e-4."
+    - "First real-run validation config: short, low-risk, reproducible."
+    - "If OOM occurs, reduce max_seq_length to 256 before changing other parameters."
+    - "If unstable loss appears, lower learning_rate to 1e-4."
