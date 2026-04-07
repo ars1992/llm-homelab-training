@@ -31,14 +31,18 @@ Reproduzierbare lokale Container-Umgebung für LLM-Training (LoRA/Fine-Tuning) a
 │       ├── prepare_dataset.py
 │       ├── generate_self_edits.py
 │       ├── train_lora.py
-│       └── eval.py
+│       ├── eval.py
+│       └── eval_val.py
 ├── scripts/
 │   └── check_gpu.sh
 ├── configs/
 │   ├── base.yaml
 │   ├── train_lora_3b_k80.yaml
+│   ├── train_lora_3b_k80_short.yaml
 │   ├── smoke_lora.yaml
-│   └── eval.yaml
+│   ├── eval.yaml
+│   └── datasets/
+│       └── val_regression.yaml
 ├── docs/
 │   ├── ROADMAP.md
 │   ├── SEAL_NOTES.md
@@ -136,9 +140,21 @@ Der Smoke-Workflow führt fail-fast aus:
 5. Mini-Eval/Infer
 6. Smoke-Report unter `data/runs/smoke/report.txt`
 
+### 8) Regression-Eval auf `val.jsonl`
+
+```bash
+make eval-val
+```
+
+Ergebnisartefakte:
+- `data/evals/<run-id>/val_report.json`
+- `data/evals/<run-id>/val_predictions.jsonl`
+
 ---
 
-## Datensatzformat (MVP)
+## Datensatzformate
+
+### A) Training (`data/datasets/train.jsonl`)
 
 `train_lora.py` erwartet JSONL mit je einem Objekt pro Zeile:
 
@@ -147,12 +163,24 @@ Der Smoke-Workflow führt fail-fast aus:
 ```
 
 Hinweise:
-
 - `instruction` ist Pflicht
 - `output` ist Pflicht
 - `input` kann leer sein (`""`)
 - Encoding: UTF-8
 - Eine Zeile = ein Trainingsbeispiel
+
+### B) Regression-Validation (`data/datasets/val.jsonl`)
+
+`eval_val.py` erwartet JSONL im folgenden Schema:
+
+```json
+{"id":"val-001","instruction":"...","input":"","expected_contains":["..."],"tags":["regression"]}
+```
+
+Hinweise:
+- `expected_contains` enthält 1–3 kurze Substrings
+- Prüfung erfolgt substring-basiert (`pass/fail`)
+- Dieses Schema ist für Regression-Eval gedacht, nicht als direktes `output`-Trainingslabel
 
 ---
 
@@ -161,6 +189,7 @@ Hinweise:
 - LoRA-Adapter: `data/models/<run-id>/`
 - Trainingslogs (TensorBoard): `data/logs/<run-id>/`
 - Datensätze: `data/datasets/`
+- Regression-Reports: `data/evals/<run-id>/val_report.json`
 
 `data/` enthält Laufzeitartefakte und soll großteils **nicht versioniert** werden (siehe `.gitignore`).
 
@@ -169,10 +198,11 @@ Hinweise:
 ## Workflow-Überblick
 
 1. Datensatz erstellen/validieren (`prepare_dataset.py`, Schema in `src/datasets/schemas/`)
-2. Trainingskonfiguration wählen (`configs/train_lora_3b_k80.yaml`)
+2. Trainingskonfiguration wählen (`configs/train_lora_3b_k80.yaml` oder `configs/train_lora_3b_k80_short.yaml`)
 3. LoRA-Training ausführen (`src/scripts/train_lora.py`)
-4. Ergebnisse evaluieren (`src/scripts/eval.py`)
-5. Iterativ verbessern (später: Self-Edit-Pipeline via `generate_self_edits.py`)
+4. Regression-Eval ausführen (`src/scripts/eval_val.py`, `configs/datasets/val_regression.yaml`)
+5. Optional klassische Eval ausführen (`src/scripts/eval.py`)
+6. Iterativ verbessern (später: Self-Edit-Pipeline via `generate_self_edits.py`)
 
 ---
 

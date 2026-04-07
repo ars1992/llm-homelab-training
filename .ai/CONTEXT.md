@@ -20,6 +20,8 @@ Der aktuelle Fokus ist ein stabiler MVP-Trainingspfad; darauf aufbauend folgt ei
   Schemata für strukturierte Datensätze (u. a. Self-Edit)
 - `configs/`  
   Laufkonfigurationen (Basis, K80-LoRA, Evaluation)
+- `configs/datasets/`  
+  Dataset-spezifische Konfigurationen (u. a. Regression-Eval für `val.jsonl`)
 - `docs/`  
   Roadmap, K80-Troubleshooting, SEAL-Notizen, Backup-Policy
 - `scripts/`  
@@ -128,8 +130,14 @@ Der Smoke-Workflow führt deterministisch aus:
     - `train_runtime`: `1898.2539s`
     - `train_steps_per_second`: `0.032`
     - `train_samples_per_second`: `0.506`
+  - Regression-Eval ergänzt:
+    - Committed Regression-Set: `data/datasets/val.jsonl` (Schema mit `expected_contains`)
+    - Dataset-Config: `configs/datasets/val_regression.yaml`
+    - Eval-Skript: `src/scripts/eval_val.py`
+    - Make-Target: `make eval-val`
+    - Berichtspfad: `data/evals/<run-id>/val_report.json`
   - Nächster Gate-Status:
-    - Ein längerer Real-Run ist freigegeben, weiterhin mit konservativen K80-Parametern und vollständiger Run-ID-/Artefaktprüfung.
+    - Ein längerer Real-Run ist freigegeben, weiterhin unter konservativen K80-Parametern und mit vollständiger Run-ID-/Artefaktprüfung.
 
 ## Erstes Real-Run Protokoll (verbindlich)
 
@@ -194,6 +202,17 @@ Nach jedem Real-Run dokumentieren:
 - Folgeaktion:
   1. Eval-Prompts um klare Antwortgrenzen erweitern (Länge/Format/Stop-Kriterien).
   2. Val-Set um offene Wissensfragen ergänzen und mit festen Qualitätskriterien evaluieren.
+
+## Regression-Eval Standard (committed)
+- Val-Set im Repo: `data/datasets/val.jsonl`
+- Eval-Konfiguration: `configs/datasets/val_regression.yaml`
+- Ausführung:
+  1. `make real-run-short` (falls kein aktueller Adapter vorliegt)
+  2. `make eval-val`
+- Ergebnisprüfung:
+  - `val_report.json` vorhanden
+  - Passrate und Fail-Cases im Report nachvollziehbar
+  - Bei niedriger Passrate: gezielte Datensatz-/Prompt-Verbesserung statt Infrastrukturänderung
 
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.
