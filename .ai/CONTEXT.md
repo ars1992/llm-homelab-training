@@ -28,7 +28,7 @@ Der aktuelle Fokus ist ein stabiler MVP-Trainingspfad; darauf aufbauend folgt ei
 - `scripts/`  
   Betriebsnahe Prüfscripte (u. a. `check_gpu.sh` für Preflight)
 - `Makefile`  
-  Standardisierte Targets für Preflight, Smoke, Training und Betrieb
+  Standardisierte Targets für Preflight, Smoke, Training, Retention, Recovery (`swap-reset`) und Betrieb
 - `data/`  
   Lokale, nicht versionierte Artefakte: Datensätze, Modelle, Logs
 - `.ai/`  
@@ -79,6 +79,10 @@ Der Smoke-Workflow führt deterministisch aus:
 
 6. Standardpfad (host-freundlich, empfohlen):
 `make real-run-short` oder `make real-run-continue`
+
+Hinweis zu Continue-Priorität:
+- `make real-run-continue` priorisiert als Startpunkt den neuesten **Real-Run Adapter** (`data/models/real-*` mit `adapter_config.json`).
+- Falls kein geeigneter Real-Run vorhanden ist, greift ein Fallback auf den nächsten verfügbaren gültigen Adapter.
 
 7. Optional direkter Container-Start (nur bei gezieltem Debugging):
 `docker compose -f docker/compose.yaml exec trainer bash`
@@ -259,7 +263,15 @@ Nach jedem Real-Run dokumentieren:
   - `real-run-continue`
   - `prepare-dataset` / `smoke-train` / `eval-val` (ebenfalls priorisiert)
 - Optionaler CPU-Cap verfügbar: `make limit-cpu` (Container-Update auf feste CPU-Obergrenze)
+- Optionales Host-Recovery-Target verfügbar: `make swap-reset`
+  - Guard: nur ausführen, wenn `MemAvailable` ausreichend hoch ist (Schwellwertprüfung), sonst Warnung und Skip.
 - Memory-Pressure wird als Warnsignal geführt (nicht blockierend), OOM-Diagnostik erfolgt best-effort bei Fehlern.
+
+## Retention- und Run-Pointer-Disziplin (neu)
+- `retention-clean` schützt die in `data/runs/LATEST_REALRUN_ID` referenzierte Run-ID vor versehentlichem Prune (insb. `data/models` und `data/logs`).
+- Nach Retention wird der Pointer validiert:
+  - zeigt `LATEST_REALRUN_ID` auf keinen vorhandenen Adapter mehr, wird automatisch auf den neuesten verfügbaren gültigen Adapter (`adapter_config.json` vorhanden) repariert.
+- Ziel: `make run-status` und `make eval-val` bleiben auch nach Retention lauffähig.
 
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

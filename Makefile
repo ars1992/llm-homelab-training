@@ -41,7 +41,7 @@ NIGHTLY_APPLY_CPU_LIMIT ?= 0
 
 .PHONY: help \
 	preflight check-docker check-gpu-host check-gpu-container check-paths gpu-info \
-	build up limit-cpu down restart ps logs shell \
+	build up limit-cpu swap-reset down restart ps logs shell \
 	ensure-data-dirs \
 	train eval eval-val prepare-dataset prepare-dataset-vault self-edits tensorboard \
 	real-run-short real-run-continue run-status nightly-run \
@@ -54,6 +54,7 @@ help:
 	@echo "  build                 - Build trainer image"
 	@echo "  up                    - Start trainer container in background"
 	@echo "  limit-cpu             - Optional: apply docker CPU cap (cpus=6) to trainer container"
+	@echo "  swap-reset            - Reset host swap when MemAvailable > ~6GB (sudo swapoff/swapon)"
 	@echo "  down                  - Stop/remove trainer container"
 	@echo "  restart               - Restart trainer container"
 	@echo "  ps                    - Show compose service status"
@@ -107,6 +108,23 @@ up: ensure-data-dirs
 limit-cpu: up
 	@docker update --cpus=6 llm-homelab-trainer >/dev/null
 	@echo "OK: applied CPU limit (cpus=6) to llm-homelab-trainer"
+
+swap-reset:
+	@set -e; \
+	if [ ! -r /proc/meminfo ]; then \
+		echo "WARN: /proc/meminfo not available on this host. swap-reset skipped."; \
+		exit 0; \
+	fi; \
+	MEM_AVAIL_KB=$$(awk '/MemAvailable:/ {print $$2}' /proc/meminfo); \
+	THRESHOLD_KB=6000000; \
+	echo "INFO: MemAvailable_kB=$$MEM_AVAIL_KB threshold_kB=$$THRESHOLD_KB"; \
+	if [ "$$MEM_AVAIL_KB" -gt "$$THRESHOLD_KB" ]; then \
+		echo "INFO: resetting swap (swapoff/swapon)"; \
+		sudo swapoff -a && sudo swapon -a; \
+		echo "OK: swap reset completed"; \
+	else \
+		echo "WARN: MemAvailable too low for safe swap reset. Skipping."; \
+	fi
 
 check-gpu-container: up
 	@./scripts/check_gpu.sh --container-only --compose-file $(COMPOSE_FILE) --service $(SERVICE)
@@ -220,6 +238,9 @@ real-run-continue: preflight up check-gpu-container
 		if [ -f data/models/$$CANDIDATE/adapter_config.json ]; then \
 			PREV_RUN_ID="$$CANDIDATE"; \
 		fi; \
+	fi; \
+	if [ -z "$$PREV_RUN_ID" ]; then \
+		PREV_RUN_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | grep -E '^real-[0-9]{8}T[0-9]{6}Z$$' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
 	fi; \
 	if [ -z "$$PREV_RUN_ID" ]; then \
 		PREV_RUN_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
@@ -351,13 +372,21 @@ smoke-report:
 
 # Keeps latest N run-like directories in models/logs/evals.
 # Never touches HF caches (outside these paths).
+# Protects LATEST_REALRUN_ID from pruning and repairs stale pointer afterwards.
 retention-clean:
 	@set -e; \
 	KEEP=$(RETENTION_KEEP); \
-	echo "INFO: retention keep=$$KEEP"; \
+	PROTECT_RUN_ID=""; \
+	if [ -f $(LATEST_REALRUN_ID_FILE) ]; then \
+		PROTECT_RUN_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
+	fi; \
+	echo "INFO: retention keep=$$KEEP protect_run_id=$$PROTECT_RUN_ID"; \
 	for ROOT in data/models data/logs data/evals; do \
 		[ -d $$ROOT ] || { echo "INFO: skip missing $$ROOT"; continue; }; \
 		CANDIDATES=$$(find $$ROOT -mindepth 1 -maxdepth 1 -type d -print | sed "s#^$$ROOT/##" | grep -E ".*-[0-9]{8}T[0-9]{6}Z$$" | sort -r); \
+		if [ -n "$$PROTECT_RUN_ID" ]; then \
+			CANDIDATES=$$(printf '%s\n' "$$CANDIDATES" | grep -v -x "$$PROTECT_RUN_ID" || true); \
+		fi; \
 		COUNT=$$(printf '%s\n' "$$CANDIDATES" | sed '/^$$/d' | wc -l | tr -d ' '); \
 		if [ "$$COUNT" -le "$$KEEP" ]; then \
 			echo "INFO: $$ROOT nothing to prune ($$COUNT <= $$KEEP)"; \
@@ -370,6 +399,21 @@ retention-clean:
 			echo "PRUNED: $$ROOT/$$NAME"; \
 		done; \
 	done; \
+	if [ -f $(LATEST_REALRUN_ID_FILE) ]; then \
+		CURRENT_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
+		if [ ! -f data/models/$$CURRENT_ID/adapter_config.json ]; then \
+			NEW_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | grep -E '^real-[0-9]{8}T[0-9]{6}Z$$' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
+			if [ -z "$$NEW_ID" ]; then \
+				NEW_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
+			fi; \
+			if [ -n "$$NEW_ID" ]; then \
+				echo "$$NEW_ID" > $(LATEST_REALRUN_ID_FILE); \
+				echo "INFO: repaired $(LATEST_REALRUN_ID_FILE) -> $$NEW_ID"; \
+			else \
+				echo "WARN: no adapter found to repair $(LATEST_REALRUN_ID_FILE)"; \
+			fi; \
+		fi; \
+	fi; \
 	echo "OK: retention-clean done"
 
 clean-smoke:

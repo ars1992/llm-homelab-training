@@ -15,6 +15,9 @@ Dataset preparation utility with two modes:
 
 Vault extraction rules (MVP):
 - Parse sections by headings (#, ##, ###, ...)
+- Heading compatibility:
+  - Works with long and short heading markers/titles.
+  - Example: "## Training-Hooks" is recognized the same way as longer variants.
 - A section is sample-worthy if:
   a) it contains a fenced code block with language in {bash, sh, yaml, json}
   OR
@@ -299,6 +302,8 @@ def redact_secrets(text: str) -> str:
 
 
 def is_heading_line(line: str) -> bool:
+    # Any markdown heading level/title is accepted, including short markers
+    # like "## Training-Hooks" (no title whitelist is enforced).
     return re.match(r"^\s*#{1,6}\s+\S", line) is not None
 
 

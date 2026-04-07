@@ -160,6 +160,26 @@ Ergebnisartefakte:
 - `data/evals/<run-id>/val_report.json`
 - `data/evals/<run-id>/val_predictions.jsonl`
 
+### 10) Retention sicher ausführen
+
+```bash
+make retention-clean
+```
+
+Betriebsverhalten:
+- Retention schützt den Run aus `data/runs/LATEST_REALRUN_ID` vor dem Pruning.
+- Falls `LATEST_REALRUN_ID` auf einen fehlenden Adapter zeigt, wird der Pointer auf den neuesten vorhandenen Adapter-Run repariert.
+
+### 11) Swap nach schwerem Lauf zurücksetzen (Host)
+
+```bash
+make swap-reset
+```
+
+Betriebsverhalten:
+- `swap-reset` wird nur ausgeführt, wenn `MemAvailable` auf dem Host größer als ca. 6 GB ist.
+- Bei zu wenig verfügbarem RAM wird der Schritt mit Warnung übersprungen.
+
 ---
 
 ## Datensatzformate
@@ -209,10 +229,12 @@ Hinweise:
 
 1. Datensatz erstellen/validieren (`prepare_dataset.py`, Schema in `src/datasets/schemas/`)
 2. Trainingskonfiguration wählen (`configs/train_lora_3b_k80.yaml` oder `configs/train_lora_3b_k80_short.yaml`)
-3. LoRA-Training ausführen (`src/scripts/train_lora.py`)
-4. Regression-Eval ausführen (`src/scripts/eval_val.py`, `configs/datasets/val_regression.yaml`)
-5. Optional klassische Eval ausführen (`src/scripts/eval.py`)
-6. Iterativ verbessern (später: Self-Edit-Pipeline via `generate_self_edits.py`)
+3. LoRA-Training ausführen (`make real-run-short` oder `make real-run-continue`)
+4. Continue-Priorität: zuerst letzter `real-*` Adapter mit `adapter_config.json`, erst danach generischer Fallback
+5. Regression-Eval ausführen (`make eval-val`, non-blocking)
+6. Retention ausführen (`make retention-clean`) mit Schutz/Reparatur von `LATEST_REALRUN_ID`
+7. Optional klassische Eval ausführen (`src/scripts/eval.py`)
+8. Iterativ verbessern (später: Self-Edit-Pipeline via `generate_self_edits.py`)
 
 ---
 
