@@ -1,0 +1,29 @@
+name: val_regression
+description: Committed regression validation set for deterministic substring checks.
+
+dataset:
+  path: data/datasets/val.jsonl
+  format: jsonl
+  id_field: id
+  instruction_field: instruction
+  input_field: input
+  expected_contains_field: expected_contains
+  tags_field: tags
+
+determinism:
+  seed: 42
+  shuffle: false
+  max_samples: 0   # 0 = use full dataset
+
+evaluation:
+  batch_size: 1
+  max_new_tokens: 96
+  temperature: 0.0
+  top_p: 1.0
+  do_sample: false
+  case_sensitive: false
+  trim_whitespace: true
+
+outputs:
+  root_dir: data/evals
+  report_filename: val_report.json

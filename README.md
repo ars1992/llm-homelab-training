@@ -258,6 +258,12 @@ Restore-Drills (regelmäßig):
 ## Nächste Schritte
 
 - Basisdatensatz + Validierung robust machen
+
+## Externe Referenzen (Vault)
+
+- ADR: `ADR_Trainingsdaten_im_llm-homelab-training_repo_2026-04-06`
+- Blueprint: `Dokumentation_Projektplan_TrainingData_Blueprint_2026-04-06`
+- Checklist: `Dokumentation_Dataset_Quality_Checklist_Eval_Gates_2026-04-06`
 - Evaluationsmetriken formalisieren
 - SEAL-inspirierte Self-Edit-Loop als kontrollierte Pipeline ergänzen
 - Dokumentation in `docs/` und Architekturentscheidungen in `.ai/` fortlaufend pflegen

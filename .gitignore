@@ -46,6 +46,17 @@ temp/
 data/*
 !data/README.md
 
+# Keep a small committed regression dataset and minimal eval directory scaffold
+!data/datasets/
+data/datasets/*
+!data/datasets/val.jsonl
+!data/datasets/README.md
+!data/datasets/.gitkeep
+
+!data/evals/
+data/evals/*
+!data/evals/.gitkeep
+
 # --- Model / checkpoint artifacts ---
 checkpoints/
 runs/

@@ -21,11 +21,15 @@ REALRUN_DATASET := data/datasets/train.jsonl
 RUN_STATE_DIR := data/runs
 LATEST_REALRUN_ID_FILE := $(RUN_STATE_DIR)/LATEST_REALRUN_ID
 
+VAL_REG_CONFIG := configs/datasets/val_regression.yaml
+VAL_REG_DATASET := data/datasets/val.jsonl
+VAL_REG_OUTPUT_ROOT := data/evals
+
 .PHONY: help \
 	preflight check-docker check-gpu-host check-gpu-container check-paths gpu-info \
 	build up down restart ps logs shell \
 	ensure-data-dirs \
-	train eval prepare-dataset self-edits tensorboard \
+	train eval eval-val prepare-dataset self-edits tensorboard \
 	real-run-short run-status \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
 	clean-smoke clean-data
@@ -44,6 +48,7 @@ help:
 	@echo "  ensure-data-dirs - Create expected local data directories"
 	@echo "  train            - Start LoRA training using default config"
 	@echo "  eval             - Run eval script on dataset"
+	@echo "  eval-val         - Run deterministic expected_contains regression checks"
 	@echo "  prepare-dataset  - Validate/normalize dataset JSONL"
 	@echo "  self-edits       - Generate placeholder self-edit candidates"
 	@echo "  tensorboard      - Start tensorboard in container (port 6006)"
@@ -111,6 +116,26 @@ eval: up
 		--dataset data/datasets/val.jsonl \
 		--base-model $(BASE_MODEL) \
 		--output-dir data/evals/manual-eval
+
+eval-val: up
+	@set -e; \
+	if [ ! -f $(LATEST_REALRUN_ID_FILE) ]; then \
+		echo "ERROR: missing $(LATEST_REALRUN_ID_FILE). Run 'make real-run-short' first."; \
+		exit 1; \
+	fi; \
+	RUN_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
+	ADAPTER_PATH=data/models/$$RUN_ID; \
+	EVAL_RUN_ID=val-$$RUN_ID-$$(date -u +%Y%m%dT%H%M%SZ); \
+	echo "EVAL_VAL_RUN_ID=$$EVAL_RUN_ID"; \
+	$(COMPOSE) exec -T $(SERVICE) python src/scripts/eval_val.py \
+		--config $(VAL_REG_CONFIG) \
+		--dataset $(VAL_REG_DATASET) \
+		--base-model $(BASE_MODEL) \
+		--adapter-path $$ADAPTER_PATH \
+		--run-id $$EVAL_RUN_ID \
+		--output-dir $(VAL_REG_OUTPUT_ROOT); \
+	test -f $(VAL_REG_OUTPUT_ROOT)/$$EVAL_RUN_ID/val_report.json || { echo "ERROR: missing val_report.json for $$EVAL_RUN_ID"; exit 1; }; \
+	echo "OK: eval-val finished for $$EVAL_RUN_ID"
 
 prepare-dataset: up
 	@$(COMPOSE) exec $(SERVICE) python src/scripts/prepare_dataset.py \
