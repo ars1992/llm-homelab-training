@@ -80,9 +80,12 @@ Der Smoke-Workflow führt deterministisch aus:
 6. Standardpfad (host-freundlich, empfohlen):
 `make real-run-short` oder `make real-run-continue`
 
-Hinweis zu Continue-Priorität:
+Hinweis zu Continue-Priorität und Stabilitäts-Gates:
 - `make real-run-continue` priorisiert als Startpunkt den neuesten **Real-Run Adapter** (`data/models/real-*` mit `adapter_config.json`).
 - Falls kein geeigneter Real-Run vorhanden ist, greift ein Fallback auf den nächsten verfügbaren gültigen Adapter.
+- Vor Heavy-Steps greifen Single-Flight und Swap-Gates:
+  - Single-Flight-Lock (`data/runs/LOCK`) verhindert parallele Train/Eval-Läufe.
+  - Swap-Gate prüft `MemAvailable` und `SwapFree` vor Training/Eval.
 
 7. Optional direkter Container-Start (nur bei gezieltem Debugging):
 `docker compose -f docker/compose.yaml exec trainer bash`
@@ -267,11 +270,29 @@ Nach jedem Real-Run dokumentieren:
   - Guard: nur ausführen, wenn `MemAvailable` ausreichend hoch ist (Schwellwertprüfung), sonst Warnung und Skip.
 - Memory-Pressure wird als Warnsignal geführt (nicht blockierend), OOM-Diagnostik erfolgt best-effort bei Fehlern.
 
+## Single-Flight Lock + Swap-Gates (neu)
+- Single-Flight-Lock:
+  - Lockfile: `data/runs/LOCK`
+  - Verhalten: Wenn Lock aktiv ist, brechen `real-run-short`, `real-run-continue`, `eval-val` und `nightly-run` mit `already_running` ab.
+  - Betriebsziele: keine parallelen Heavy-Runs, weniger RAM-/Swap-Spitzen.
+- Swap-Gates:
+  - Vor Training (`real-run-*`): Prüfung von `MemAvailable` und `SwapFree`; bei kritischem Zustand wird zunächst `swap-reset` versucht, danach Abbruch falls weiterhin kritisch.
+  - Vor Eval (`eval-val`): gleiche Prüfung; bei weiterhin kritischem Zustand wird Eval übersprungen (non-blocking Policy bleibt erhalten).
+- Lock-Operations:
+  - Status prüfen: `make lock-status`
+  - Manuelle Recovery bei stale Lock: `make lock-clear` (nur bewusst und kontrolliert verwenden).
+
 ## Retention- und Run-Pointer-Disziplin (neu)
 - `retention-clean` schützt die in `data/runs/LATEST_REALRUN_ID` referenzierte Run-ID vor versehentlichem Prune (insb. `data/models` und `data/logs`).
 - Nach Retention wird der Pointer validiert:
   - zeigt `LATEST_REALRUN_ID` auf keinen vorhandenen Adapter mehr, wird automatisch auf den neuesten verfügbaren gültigen Adapter (`adapter_config.json` vorhanden) repariert.
 - Ziel: `make run-status` und `make eval-val` bleiben auch nach Retention lauffähig.
+
+## Notfall-Runbook bei anhaltendem Speicher-/Swap-Druck
+1. Nicht-kritische Services stoppen (z. B. TensorBoard/Serving), um RAM und I/O zu entlasten.
+2. `swap-reset` nur bei ausreichendem `MemAvailable` ausführen.
+3. Falls Druck dauerhaft hoch bleibt: Swap temporär vergrößern und anschließend Trainingsprofil weiter entschärfen (`max_seq_length`, Parallelität, Workload).
+4. Grundsatz: Swap ist Stabilitäts-Puffer, keine Dauerlösung für regulären Betrieb.
 
 ## Nächster Ausbauschritt
 Self-Edit-Workflow (SEAL-inspiriert) über `src/scripts/generate_self_edits.py` und `src/datasets/schemas/self_edit.schema.json` schrittweise produktionsnah ausbauen.

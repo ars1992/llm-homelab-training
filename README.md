@@ -180,6 +180,25 @@ Betriebsverhalten:
 - `swap-reset` wird nur ausgeführt, wenn `MemAvailable` auf dem Host größer als ca. 6 GB ist.
 - Bei zu wenig verfügbarem RAM wird der Schritt mit Warnung übersprungen.
 
+### 12) Single-Flight Lock + Swap-Gates (Stabilität)
+
+```bash
+make lock-status
+make real-run-continue
+make eval-val
+```
+
+Betriebsverhalten:
+- Es darf immer nur ein schwerer Lauf gleichzeitig aktiv sein (Single-Flight über `data/runs/LOCK`).
+- Wenn ein Lock aktiv ist, brechen `real-run-*`, `eval-val` und `nightly-run` mit klarer Meldung ab (`already_running`).
+- Vor Training und Eval greifen Swap-Gates:
+  - Training: bei kritischem Speicher-/Swap-Zustand wird abgebrochen.
+  - Eval: bei kritischem Zustand wird der Lauf übersprungen (non-blocking Policy bleibt erhalten).
+
+Recovery:
+- Lock prüfen: `make lock-status`
+- Lock nur bei eindeutigem Stale-Zustand entfernen: `make lock-clear`
+
 ---
 
 ## Datensatzformate
@@ -229,12 +248,14 @@ Hinweise:
 
 1. Datensatz erstellen/validieren (`prepare_dataset.py`, Schema in `src/datasets/schemas/`)
 2. Trainingskonfiguration wählen (`configs/train_lora_3b_k80.yaml` oder `configs/train_lora_3b_k80_short.yaml`)
-3. LoRA-Training ausführen (`make real-run-short` oder `make real-run-continue`)
-4. Continue-Priorität: zuerst letzter `real-*` Adapter mit `adapter_config.json`, erst danach generischer Fallback
-5. Regression-Eval ausführen (`make eval-val`, non-blocking)
-6. Retention ausführen (`make retention-clean`) mit Schutz/Reparatur von `LATEST_REALRUN_ID`
-7. Optional klassische Eval ausführen (`src/scripts/eval.py`)
-8. Iterativ verbessern (später: Self-Edit-Pipeline via `generate_self_edits.py`)
+3. Single-Flight prüfen (`make check-single-flight` bzw. indirekt über Lauf-Targets)
+4. LoRA-Training ausführen (`make real-run-short` oder `make real-run-continue`)
+5. Continue-Priorität: zuerst letzter `real-*` Adapter mit `adapter_config.json`, erst danach generischer Fallback
+6. Swap-Gates vor schweren Schritten beachten (Train = abort bei kritisch, Eval = skip bei kritisch)
+7. Regression-Eval ausführen (`make eval-val`, non-blocking)
+8. Retention ausführen (`make retention-clean`) mit Schutz/Reparatur von `LATEST_REALRUN_ID`
+9. Optional klassische Eval ausführen (`src/scripts/eval.py`)
+10. Iterativ verbessern (später: Self-Edit-Pipeline via `generate_self_edits.py`)
 
 ---
 
@@ -266,6 +287,12 @@ Wenn der Host während Dataset-Prep oder Training unbedienbar wird, gilt folgend
 Hinweis:
 - Diese Maßnahmen priorisieren Host-Stabilität und Bedienbarkeit.
 - Der Lauf kann dadurch langsamer werden; das ist erwartetes Verhalten.
+
+Notfall-Runbook (wenn Host trotz Maßnahmen unresponsiv wird):
+1. Nicht-kritische Dienste stoppen (z. B. TensorBoard/Serving), um RAM/I/O zu entlasten.
+2. Swap-Status prüfen und nur bei ausreichendem RAM `make swap-reset` ausführen.
+3. Falls Druck dauerhaft hoch bleibt: Swap temporär vergrößern und danach Ursache im Trainingsprofil beheben.
+4. Zielzustand ist stabiler RAM-Betrieb; Swap ist nur Notfallpuffer, keine Dauerlösung.
 
 ### Verbindliche Legacy-GPU Baseline (frozen)
 
