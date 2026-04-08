@@ -330,9 +330,9 @@ prepare-dataset-vault: up
 		--report $(VAULT_PREPARE_REPORT)
 
 # B1: Validate val.jsonl structural integrity (host-side, no container required).
-# Exit 0 = clean; Exit 1 = structural errors found.
+# Exit 0 = clean; Exit 1 = structural errors found. src/scripts/validate_val.py
 validate-val:
-	@python src/scripts/validate_val.py \
+	@python3 src/scripts/validate_val.py \
 		--dataset $(VAL_REG_DATASET) \
 		--verbose \
 		--report $(VAL_VALIDATE_REPORT)
