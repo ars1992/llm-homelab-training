@@ -52,6 +52,8 @@ data/datasets/*
 !data/datasets/val.jsonl
 !data/datasets/README.md
 !data/datasets/.gitkeep
+!data/datasets/runbook_samples.jsonl
+!data/datasets/exact_extraction_samples.jsonl
 
 !data/evals/
 data/evals/*

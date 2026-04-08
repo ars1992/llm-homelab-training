@@ -21,6 +21,9 @@ services:
             - ../configs:/workspace/configs
             - ../data:/workspace/data
             - "/mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation:/vault/15_Dokumentation:ro"
+            # Optional: ExactExtraction samples vault (C1 prepare-dataset-exact target).
+            # Host path must exist; if absent Docker Compose will create an empty bind-mount directory.
+            - "/mnt/qnap/Obsidian_Vaults/Work/0 Seeds/10 Projekte/Eigenes_LLM_trainieren/TrainingSamples/ExactExtraction:/vault/exact_extraction:ro"
         gpus: all
         command: ["sleep", "infinity"]
         ports:

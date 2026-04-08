@@ -39,6 +39,13 @@ VAULT_PREPARE_REPORT := data/datasets/prepare_report.json
 RETENTION_KEEP ?= 3
 NIGHTLY_APPLY_CPU_LIMIT ?= 0
 
+# Supplemental dataset paths (augmentation for C1/C3)
+EXACT_EXTRACTION_VAULT := /vault/exact_extraction
+EXACT_EXTRACTION_OUTPUT := data/datasets/exact_extraction_samples.jsonl
+EXACT_EXTRACTION_REPORT := data/datasets/exact_extraction_report.json
+RUNBOOK_SAMPLES := data/datasets/runbook_samples.jsonl
+VAL_VALIDATE_REPORT := data/datasets/val_validate_report.json
+
 RUN_LOCK_FILE := $(RUN_STATE_DIR)/LOCK
 SWAP_GATE_SWAPFREE_MIN_KB ?= 524288
 SWAP_GATE_MEM_MIN_KB ?= 2000000
@@ -47,45 +54,50 @@ SWAP_GATE_MEM_MIN_KB ?= 2000000
 	preflight check-docker check-gpu-host check-gpu-container check-paths gpu-info \
 	build up limit-cpu swap-reset check-single-flight lock-status lock-clear swap-gate-train swap-gate-eval down restart ps logs shell \
 	ensure-data-dirs \
-	train eval eval-val prepare-dataset prepare-dataset-vault self-edits tensorboard \
+	train eval eval-val validate-val prepare-dataset prepare-dataset-vault \
+	prepare-dataset-exact prepare-dataset-augmented \
+	self-edits tensorboard \
 	real-run-short real-run-continue run-status nightly-run \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
 	retention-clean clean-smoke clean-data
 
 help:
 	@echo "Targets:"
-	@echo "  preflight             - Verify local prerequisites (docker, gpu, paths)"
-	@echo "  build                 - Build trainer image"
-	@echo "  up                    - Start trainer container in background"
-	@echo "  limit-cpu             - Optional: apply docker CPU cap (cpus=6) to trainer container"
-	@echo "  swap-reset            - Reset host swap when MemAvailable > ~6GB (sudo swapoff/swapon)"
-	@echo "  check-single-flight   - Abort if another train/eval workflow is already running"
-	@echo "  lock-status           - Show current lock file state"
-	@echo "  lock-clear            - Remove lock file (manual recovery only)"
-	@echo "  swap-gate-train       - Swap gate for training (tries swap-reset, aborts on low SwapFree)"
-	@echo "  swap-gate-eval        - Swap gate for eval (tries swap-reset, exits 2 if still low)"
-	@echo "  down                  - Stop/remove trainer container"
-	@echo "  restart               - Restart trainer container"
-	@echo "  ps                    - Show compose service status"
-	@echo "  logs                  - Tail service logs"
-	@echo "  shell                 - Open shell inside trainer container"
-	@echo "  gpu-info              - Show nvidia-smi inside container"
-	@echo "  ensure-data-dirs      - Create expected local data directories"
-	@echo "  train                 - Start LoRA training using default config"
-	@echo "  eval                  - Run eval script on dataset"
-	@echo "  eval-val              - Run expected_contains regression checks (non-blocking, always RC=0)"
-	@echo "  prepare-dataset       - Validate/normalize dataset JSONL"
-	@echo "  prepare-dataset-vault - Build train.jsonl from /vault/15_Dokumentation markdown files"
-	@echo "  self-edits            - Generate placeholder self-edit candidates"
-	@echo "  tensorboard           - Start tensorboard in container (port 6006)"
-	@echo "  real-run-short        - Fresh short run (new adapter from base model)"
-	@echo "  real-run-continue     - Continue from latest OK adapter; fallback to fresh short run"
-	@echo "  run-status            - Show latest real-run id and artifact status"
-	@echo "  nightly-run           - preflight -> prepare-dataset-vault -> optional limit-cpu -> gate(new_samples_count) -> real-run-continue -> eval-val -> retention-clean"
-	@echo "  smoke                 - End-to-end smoke workflow (check/build/up/train/infer/report)"
-	@echo "  retention-clean       - Keep only latest N run-like dirs in models/logs/evals (default N=3)"
-	@echo "  clean-smoke           - Remove smoke outputs"
-	@echo "  clean-data            - Remove generated datasets/evals/logs/models (keeps data/README.md)"
+	@echo "  preflight                  - Verify local prerequisites (docker, gpu, paths)"
+	@echo "  build                      - Build trainer image"
+	@echo "  up                         - Start trainer container in background"
+	@echo "  limit-cpu                  - Optional: apply docker CPU cap (cpus=6) to trainer container"
+	@echo "  swap-reset                 - Reset host swap when MemAvailable > ~6GB (sudo swapoff/swapon)"
+	@echo "  check-single-flight        - Abort if another train/eval workflow is already running"
+	@echo "  lock-status                - Show current lock file state"
+	@echo "  lock-clear                 - Remove lock file (manual recovery only)"
+	@echo "  swap-gate-train            - Swap gate for training (tries swap-reset, aborts on low SwapFree)"
+	@echo "  swap-gate-eval             - Swap gate for eval (tries swap-reset, exits 2 if still low)"
+	@echo "  down                       - Stop/remove trainer container"
+	@echo "  restart                    - Restart trainer container"
+	@echo "  ps                         - Show compose service status"
+	@echo "  logs                       - Tail service logs"
+	@echo "  shell                      - Open shell inside trainer container"
+	@echo "  gpu-info                   - Show nvidia-smi inside container"
+	@echo "  ensure-data-dirs           - Create expected local data directories"
+	@echo "  train                      - Start LoRA training using default config"
+	@echo "  eval                       - Run eval script on dataset"
+	@echo "  eval-val                   - Run expected_contains regression checks (non-blocking, RC=0)"
+	@echo "  validate-val               - Validate val.jsonl for structural integrity (host-side, no container)"
+	@echo "  prepare-dataset            - Validate/normalize dataset JSONL"
+	@echo "  prepare-dataset-vault      - Build train.jsonl from /vault/15_Dokumentation markdown files"
+	@echo "  prepare-dataset-exact      - Extract exact_extraction samples from /vault/exact_extraction MD files"
+	@echo "  prepare-dataset-augmented  - Vault dataset + append exact_extraction + runbook samples -> train.jsonl"
+	@echo "  self-edits                 - Generate placeholder self-edit candidates"
+	@echo "  tensorboard                - Start tensorboard in container (port 6006)"
+	@echo "  real-run-short             - Fresh short run (new adapter from base model)"
+	@echo "  real-run-continue          - Continue from latest OK adapter; fallback to fresh short run"
+	@echo "  run-status                 - Show latest real-run id and artifact status"
+	@echo "  nightly-run                - preflight -> prepare-dataset-vault -> optional limit-cpu -> gate -> real-run-continue -> eval-val -> retention-clean"
+	@echo "  smoke                      - End-to-end smoke workflow (check/build/up/train/infer/report)"
+	@echo "  retention-clean            - Keep only latest N run-like dirs in models/logs/evals (default N=3)"
+	@echo "  clean-smoke                - Remove smoke outputs"
+	@echo "  clean-data                 - Remove generated datasets/evals/logs/models (keeps data/README.md)"
 
 preflight: check-docker check-gpu-host check-paths ensure-data-dirs
 
@@ -316,6 +328,62 @@ prepare-dataset-vault: up
 		--max-samples 5000 \
 		--redact-secrets true \
 		--report $(VAULT_PREPARE_REPORT)
+
+# B1: Validate val.jsonl structural integrity (host-side, no container required).
+# Exit 0 = clean; Exit 1 = structural errors found.
+validate-val:
+	@python src/scripts/validate_val.py \
+		--dataset $(VAL_REG_DATASET) \
+		--verbose \
+		--report $(VAL_VALIDATE_REPORT)
+
+# C1: Extract exact_extraction samples from MD triplets (## Instruction/Input/Output).
+# Graceful: skips with WARN if /vault/exact_extraction is not mounted.
+prepare-dataset-exact: up
+	@set -e; \
+	if $(COMPOSE) exec -T $(SERVICE) test -d $(EXACT_EXTRACTION_VAULT) 2>/dev/null; then \
+		echo "INFO: ExactExtraction vault found at $(EXACT_EXTRACTION_VAULT) — extracting samples"; \
+		./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
+			--mode exact_extraction \
+			--vault-root $(EXACT_EXTRACTION_VAULT) \
+			--output $(EXACT_EXTRACTION_OUTPUT) \
+			--max-files 500 \
+			--max-samples 1000 \
+			--report $(EXACT_EXTRACTION_REPORT); \
+	else \
+		echo "WARN: ExactExtraction vault not mounted at $(EXACT_EXTRACTION_VAULT). Skipping extraction."; \
+		echo "INFO: Seed file $(EXACT_EXTRACTION_OUTPUT) will be used if it exists (checked during augment step)."; \
+	fi
+
+# C1+C3: Augmented dataset build:
+#   1. Vault markdown extraction -> data/datasets/train_vault.jsonl
+#   2. Exact extraction samples from MD triplets (if vault mounted, else seed file used)
+#   3. Merge vault + exact_extraction + runbook samples -> train.jsonl (deduplicated)
+# Use this instead of prepare-dataset-vault when supplemental samples should be included.
+prepare-dataset-augmented: up
+	@set -e; \
+	echo "INFO: Step 1/3 — Vault markdown extraction -> train_vault.jsonl"; \
+	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
+		--mode vault_md \
+		--vault-root $(VAULT_DOCS_ROOT) \
+		--output data/datasets/train_vault.jsonl \
+		--max-files 500 \
+		--max-samples 4000 \
+		--redact-secrets true \
+		--report data/datasets/prepare_vault_report.json; \
+	echo "INFO: Step 2/3 — Exact extraction samples (vault or seed)"; \
+	$(MAKE) prepare-dataset-exact; \
+	echo "INFO: Step 3/3 — Merging all sources -> train.jsonl"; \
+	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/merge_datasets.py \
+		--sources \
+			data/datasets/train_vault.jsonl \
+			$(EXACT_EXTRACTION_OUTPUT) \
+			$(RUNBOOK_SAMPLES) \
+		--output $(VAULT_PREPARE_OUTPUT) \
+		--max-samples 5000 \
+		--report data/datasets/merge_report.json \
+		--validate-schema; \
+	echo "OK: prepare-dataset-augmented completed -> $(VAULT_PREPARE_OUTPUT)"
 
 self-edits: up
 	@$(COMPOSE) exec $(SERVICE) python src/scripts/generate_self_edits.py \

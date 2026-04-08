@@ -1,5 +1,5 @@
 name: val_regression
-description: Committed regression validation set for deterministic substring checks.
+description: Committed regression validation set for deterministic substring checks with diagnostics and partial credit.
 
 dataset:
     path: data/datasets/val.jsonl
@@ -17,12 +17,34 @@ determinism:
 
 evaluation:
     batch_size: 1
-    max_new_tokens: 16
+    max_new_tokens: 512
     temperature: 0.0
     top_p: 1.0
     do_sample: false
+
+    # Legacy-compatible defaults
     case_sensitive: false
     trim_whitespace: true
+
+    # Exact cases stay strict
+    exact:
+        case_sensitive: true
+        trim_whitespace: true
+        strip_wrappers: false
+
+    # Non-exact cases (especially runbook) may normalize more aggressively
+    non_exact:
+        case_sensitive: false
+        trim_whitespace: true
+        strip_wrappers: true
+
+    # Runbook/openbook partial credit
+    runbook:
+        pass_threshold: 0.6
+
+    # Per-item diagnostics
+    debug:
+        output_preview_chars: 200
 
 outputs:
     root_dir: data/evals

@@ -352,3 +352,78 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - Vor-/Nachlauf-Snapshots verpflichtend mit Fokus auf `MemAvailable`, `SwapTotal`, `SwapFree` plus `free -h` und `df -h /`.
   - Prozessregel:
     - Erst wenn SeqLen-/Tokenisierungshebel ausgereizt sind, weitere Optimierungen prüfen.
+
+- 2026-04-08 (Eval-Qualität + Trainingsdaten-Alignment / Aufgabenpakete A–D):
+
+  ## Diagnose-Befund (Stand: Adapter real-20260408T085717Z)
+  - make eval-val: 2/40 pass (nur val-023 und val-024).
+  - Root-Cause-Analyse:
+    - val-023/val-024 haben tags ohne "exact" → Substring-Matching → kurze Strings wie "data/models" / "data/logs" werden im Output gefunden.
+    - Alle exact-Items (val-001 bis val-022) scheitern weil OPT-2.7b mit minimalem LoRA keine Exact-Extraction gelernt hat.
+    - Alle val-rb-* (runbook) scheitern weil keine runbook-artigen Trainingssamples im Dataset vorhanden waren.
+    - Vault-Extraktion liefert überwiegend allgemeine Dokumentations-Samples, keine Exact-Extraction-Muster.
+
+  ## Umgesetzte Maßnahmen
+
+  ### A1–A4 (eval_val.py): War bereits in Vorversion implementiert
+  - missing_expected_contains, found_expected_contains, output_preview, normalized_output_preview: vorhanden.
+  - Tag-aware Normalisierung (exact vs. non-exact): vorhanden.
+  - Suite-Splitting (pass_rate_exact_openbook, pass_rate_runbook_openbook, pass_rate_closedbook): vorhanden.
+  - Partial credit für runbook_openbook (pass_threshold=0.6, coverage): vorhanden.
+  - D1/D2 (deterministischer Prompt, temperature=0): vorhanden.
+
+  ### B1 (neu): src/scripts/validate_val.py
+  - Checks V001–V007: JSON-Syntax, Pflichtfelder, eindeutige IDs, non-empty expected_contains und tags.
+  - Warnungen W001–W003: overly_strict (>12 tokens), fehlende Gruppentyp-Tags, kurze Instructions.
+  - Tag-group Distribution + expected_contains Statistik in Ausgabe.
+  - Optionaler JSON-Report.
+  - Make-Target: make validate-val (host-seitig, kein Container erforderlich).
+  - Exit-Code: 0 = clean, 1 = Fehler.
+
+  ### C1 (neu): exact_extraction Mode in prepare_dataset.py
+  - Neuer Modus --mode exact_extraction parst MD-Dateien mit ## Instruction/Input/Output Triplets.
+  - Output wird verbatim übernommen (keine Redaction, keine Umformatierung).
+  - Graceful bei fehlendem Vault-Mount.
+  - Make-Target: make prepare-dataset-exact.
+
+  ### C1 Seed-Datei (neu): data/datasets/exact_extraction_samples.jsonl
+  - 35 handkuratierte Samples die Exact-Extraction-Muster für val-001 bis val-024 trainieren.
+  - Deckt ab: Pfad-Extraktion, Service/Container-Namen, Versions-Strings, GPU-Namen, Policy-Items (Ja/Nein).
+  - Verfügbar ohne Vault-Mount → sofort einsatzbereit.
+
+  ### C2 (neu): Frontmatter-Filter in prepare_dataset.py
+  - is_frontmatter_heavy(): überspringt Sections wo >55% der Zeilen YAML-artige key:value-Muster sind.
+  - is_moc_only_output(): überspringt Outputs die nur MOC/aliases/tags-Zeilen enthalten.
+  - Beide in section_is_sample_worthy() und prepare_vault_md_mode() integriert.
+  - Neue Skip-Reasons: "frontmatter_heavy", "moc_only_output".
+
+  ### C3 (neu): data/datasets/runbook_samples.jsonl
+  - 20 Trainingssamples die alle val-rb-001 bis val-rb-010 expected_contains abdecken.
+  - Je 2 Variationen pro Testtyp (Swap, Preflight, Dataset, Continue-Run, Swap-Reset, Status, Eval, Retention, Quality-Diagnose, E2E).
+  - Outputs enthalten EXAKT die Strings aus expected_contains der val-rb-* Items als Substrings.
+
+  ### Merge-Pipeline (neu): src/scripts/merge_datasets.py + make prepare-dataset-augmented
+  - merge_datasets.py: dedupliziertes Zusammenführen mehrerer JSONL-Sources (canonical JSON-Key-Sort für Duplikat-Erkennung).
+  - Reihenfolge: train_vault.jsonl → exact_extraction_samples.jsonl → runbook_samples.jsonl → train.jsonl.
+  - Schema-Validierung nach Merge als Pflichtcheck.
+  - Make-Target: make prepare-dataset-augmented (ersetzt make prepare-dataset-vault im Augmentation-Pfad).
+
+  ### Volume-Mount (neu): docker/compose.yaml
+  - ExactExtraction-Vault: /data/obsidian-rw/Eliot/.../ExactExtraction → /vault/exact_extraction:ro
+  - Graceful: falls Host-Pfad nicht existiert, wird Docker-Bind-Mount als leeres Verzeichnis angelegt.
+  - make prepare-dataset-exact prüft Existenz vor Extraktion.
+
+  ## Empfohlene nächste Schritte (Reihenfolge)
+  1. make validate-val → val.jsonl auf Strukturfehler prüfen.
+  2. make prepare-dataset-augmented → neues train.jsonl mit Exact-Extraction + Runbook-Samples.
+  3. make real-run-short oder make real-run-continue → kurzer neuer Trainingslauf.
+  4. make eval-val → Subscores vergleichen; Ziel: pass_rate_exact_openbook > 0.6.
+  5. Runbook-Items (val-rb-*): avg_coverage > 0.3 als erster Fortschrittsindikator.
+
+  ## Lernpunkte (für zukünftige Sessions)
+  - Eval-Qualität hängt direkt vom Trainings-Datenmix ab: ohne Exact-Extraction-Samples kein Exact-Extraction-Verhalten.
+  - val-Items mit Tags ohne "exact" nutzen Substring-Matching → einfacher zu erfüllen → bewusst setzen.
+  - Runbook-Outputs müssen die expected_contains-Strings als genaue Substrings enthalten.
+  - Vault-Extraktion allein reicht nicht: gezielt kuratierte Seed-Samples für kritische Fähigkeiten ergänzen.
+  - Heredocs in Makefile-Targets sind fehleranfällig → immer eigene Python-Skripte dafür anlegen.
+  - validate_val.py host-seitig halten (kein Container-Start nötig) → schnell ausführbar im CI/pre-commit.

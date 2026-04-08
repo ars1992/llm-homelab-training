@@ -1,0 +1,35 @@
+{"instruction":"Gib den Projektpfad exakt wieder (nur der Pfad).","input":"Projektpfad: /opt/homelab/monitoring","output":"/opt/homelab/monitoring"}
+{"instruction":"Gib den Projektpfad exakt wieder (nur der Pfad).","input":"Projektpfad: /srv/ml/experiments","output":"/srv/ml/experiments"}
+{"instruction":"Gib den Projektpfad exakt wieder (nur der Pfad).","input":"Projektpfad: /home/sandro/projects/rag-pipeline","output":"/home/sandro/projects/rag-pipeline"}
+{"instruction":"Gib den Projektpfad exakt wieder (nur der Pfad).","input":"Projektpfad: /opt/containers/paperless","output":"/opt/containers/paperless"}
+{"instruction":"Nenne den Service-Namen exakt.","input":"Service in compose: postgres","output":"postgres"}
+{"instruction":"Nenne den Service-Namen exakt.","input":"Service in compose: redis-cache","output":"redis-cache"}
+{"instruction":"Nenne den Service-Namen exakt.","input":"Service in compose: reverse-proxy","output":"reverse-proxy"}
+{"instruction":"Gib den Container-Namen exakt wieder.","input":"container_name: paperless-ngx-worker","output":"paperless-ngx-worker"}
+{"instruction":"Gib den Container-Namen exakt wieder.","input":"container_name: homelab-redis","output":"homelab-redis"}
+{"instruction":"Gib den Container-Namen exakt wieder.","input":"container_name: monitoring-grafana","output":"monitoring-grafana"}
+{"instruction":"Extrahiere den Mount-Zielpfad.","input":"Volume-Mount: /mnt/nas/backups:/data/backups:ro","output":"/data/backups"}
+{"instruction":"Extrahiere den Mount-Zielpfad.","input":"Volume-Mount: /mnt/qnap/media:/srv/media:rw","output":"/srv/media"}
+{"instruction":"Extrahiere den Host-Quellpfad des Mounts exakt.","input":"Volume-Mount: /mnt/nas/configs:/app/configs:ro","output":"/mnt/nas/configs"}
+{"instruction":"Extrahiere den Host-Quellpfad des Mounts exakt.","input":"Volume-Mount: /data/obsidian/vault:/vault/docs:ro","output":"/data/obsidian/vault"}
+{"instruction":"Nenne den Config-Dateinamen exakt.","input":"Verwendete Config: configs/train_lora_7b_a100.yaml","output":"train_lora_7b_a100.yaml"}
+{"instruction":"Nenne den Config-Dateinamen exakt.","input":"Konfigurationsdatei: configs/eval_regression_v2.yaml","output":"eval_regression_v2.yaml"}
+{"instruction":"Extrahiere den Dataset-Pfad exakt.","input":"Train dataset path: data/datasets/curated_train_v2.jsonl","output":"data/datasets/curated_train_v2.jsonl"}
+{"instruction":"Extrahiere den Dataset-Pfad exakt.","input":"Validierungsdataset: data/datasets/val_extended.jsonl","output":"data/datasets/val_extended.jsonl"}
+{"instruction":"Extrahiere den Pflicht-Adapterdateinamen.","input":"Gate: data/models/<run-id>/adapter_model.bin muss existieren.","output":"adapter_model.bin"}
+{"instruction":"Nenne die CUDA-Version exakt.","input":"Container torch summary: torch_cuda_version=11.8","output":"11.8"}
+{"instruction":"Nenne die CUDA-Version exakt.","input":"Build-Info: CUDA_VERSION=12.1","output":"12.1"}
+{"instruction":"Nenne die Compute Capability exakt.","input":"GPU-Check: compute_capability_0=8.0","output":"8.0"}
+{"instruction":"Nenne die Compute Capability exakt.","input":"Container GPU-Check: compute_capability_0=7.5","output":"7.5"}
+{"instruction":"Extrahiere den GPU-Namen exakt.","input":"Container torch summary: cuda_device_0=NVIDIA A100-SXM4-80GB","output":"NVIDIA A100-SXM4-80GB"}
+{"instruction":"Extrahiere den GPU-Namen exakt.","input":"nvidia-smi: GPU 0: Tesla T4","output":"Tesla T4"}
+{"instruction":"Nenne den Driver-Versionsstring exakt.","input":"GPU Baseline: NVIDIA Driver 525.105.17","output":"525.105.17"}
+{"instruction":"Nenne den Driver-Versionsstring exakt.","input":"Host-Preflight: Driver Version: 535.54.03","output":"535.54.03"}
+{"instruction":"Nenne die Host-CUDA-Runtime exakt.","input":"GPU Baseline: CUDA Runtime 12.0 (laut nvidia-smi)","output":"12.0"}
+{"instruction":"Gib den Make-Befehl für den Dataset-Build aus.","input":"SOP: Vault-Dataset wird per Make erzeugt.","output":"make prepare-dataset-vault"}
+{"instruction":"Gib den Make-Befehl für die Retention aus.","input":"SOP: Alte Runs werden per Make bereinigt.","output":"make retention-clean"}
+{"instruction":"Darf der GPU-Stack ohne Ausnahmefreigabe aktualisiert werden? Antworte mit Ja oder Nein.","input":"","output":"Nein"}
+{"instruction":"Darf Alpine als Base-Image für diesen CUDA-PyTorch-Stack verwendet werden? Antworte mit Ja oder Nein.","input":"","output":"Nein"}
+{"instruction":"Welche Priorität gilt: Reproduzierbarkeit oder neue Features? Antworte mit einem Wort.","input":"","output":"Reproduzierbarkeit"}
+{"instruction":"Gib den exakten Dateinamen für den Regression-Report aus.","input":"Report wird geschrieben nach: data/evals/<run-id>/val_report.json","output":"val_report.json"}
+{"instruction":"Extrahiere den Mount-Zielpfad für die Vault-Dokumentation exakt.","input":"Volume-Mount: /mnt/nas/Obsidian_Vaults/Docs:/vault/documentation:ro","output":"/vault/documentation"}

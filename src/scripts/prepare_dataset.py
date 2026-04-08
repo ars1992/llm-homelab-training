@@ -413,10 +413,58 @@ def has_target_codeblock(codeblocks: List[CodeBlock]) -> bool:
     return False
 
 
+# -----------------------------
+# C2: Frontmatter and MOC filters
+# -----------------------------
+
+_FRONTMATTER_KEY_RE = re.compile(r"^\s*[\w][\w\-_]*\s*:")
+_FRONTMATTER_SEP_RE = re.compile(r"^\s*-{3,}\s*$")
+_FRONTMATTER_RATIO_THRESHOLD = 0.55  # >55% YAML-like lines → skip section
+_MOC_ONLY_PATTERNS = re.compile(
+    r"^(\s*#\s+|\s*\[\[|\s*>\s+\[\[|\s*aliases\s*:|\s*tags\s*:|\s*MOC\b|\s*up\s*::|\s*related\s*::)",
+    re.IGNORECASE,
+)
+
+
+def is_frontmatter_heavy(lines: List[str]) -> bool:
+    """
+    Returns True if the section body is predominantly YAML/frontmatter-like.
+    Heuristic: >THRESHOLD of non-empty lines match YAML key: value or --- separators.
+    Prevents metadata-only sections from becoming training samples.
+    """
+    non_empty = [ln for ln in lines if ln.strip()]
+    if len(non_empty) < 2:
+        return False
+    frontmatter_count = sum(
+        1
+        for ln in non_empty
+        if _FRONTMATTER_SEP_RE.match(ln) or _FRONTMATTER_KEY_RE.match(ln)
+    )
+    return (frontmatter_count / len(non_empty)) > _FRONTMATTER_RATIO_THRESHOLD
+
+
+def is_moc_only_output(output_text: str) -> bool:
+    """
+    Returns True if the output contains only Map-of-Content (MOC) boilerplate,
+    aliases, or tag declarations — content with no training value.
+    """
+    if not output_text or not output_text.strip():
+        return True
+    lines = [ln for ln in output_text.splitlines() if ln.strip()]
+    if not lines:
+        return True
+    moc_count = sum(1 for ln in lines if _MOC_ONLY_PATTERNS.match(ln))
+    return moc_count == len(lines)
+
+
 def section_is_sample_worthy(section: MarkdownSection) -> Tuple[bool, str]:
     lines = section.lines
     if not lines:
         return False, "empty_section"
+
+    # C2: skip sections that are predominantly YAML/frontmatter
+    if is_frontmatter_heavy(lines):
+        return False, "frontmatter_heavy"
 
     cbs = parse_codeblocks(lines)
     if has_target_codeblock(cbs):
@@ -495,6 +543,126 @@ def iter_markdown_files(vault_root: Path, max_files: Optional[int]) -> List[Path
     return files
 
 
+# -----------------------------
+# C1: Exact-extraction mode
+# -----------------------------
+
+_EXACT_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.+)$", re.MULTILINE)
+
+
+def parse_exact_extraction_records(content: str) -> List[Dict[str, str]]:
+    """
+    Parse MD files with ## Instruction / ## Input / ## Output section triplets.
+
+    Rules (verbindlich):
+    - Headings at any level (##, ###, ...) are recognised.
+    - Title match is case-insensitive, stripped.
+    - A valid triplet is Instruction → Input → Output in consecutive order.
+    - Partial triplets are silently skipped.
+    - Output is taken verbatim — no redaction, no reformatting (C1 policy).
+    - Multiple triplets per file are supported.
+    """
+    sections: List[Tuple[str, str]] = []
+    matches = list(_EXACT_HEADING_RE.finditer(content))
+    for i, m in enumerate(matches):
+        title = m.group(1).strip()
+        body_start = m.end()
+        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        body = content[body_start:body_end].strip()
+        sections.append((title, body))
+
+    records: List[Dict[str, str]] = []
+    idx = 0
+    while idx < len(sections):
+        title, body = sections[idx]
+        if title.lower() == "instruction" and body.strip():
+            instruction = body.strip()
+            if idx + 1 < len(sections) and sections[idx + 1][0].lower() == "input":
+                input_text = sections[idx + 1][1]
+                if idx + 2 < len(sections) and sections[idx + 2][0].lower() == "output":
+                    output_text = sections[idx + 2][1].strip()
+                    if output_text:
+                        records.append(
+                            {
+                                "instruction": instruction,
+                                "input": input_text,
+                                "output": output_text,
+                            }
+                        )
+                    idx += 3
+                    continue
+        idx += 1
+
+    return records
+
+
+def prepare_exact_extraction_mode(
+    vault_root: Path,
+    output_path: Path,
+    max_files: Optional[int],
+    max_samples: Optional[int],
+    encoding: str = "utf-8",
+) -> PrepareSummary:
+    """
+    Scan vault_root for MD files containing ## Instruction/Input/Output triplets
+    and write them as JSONL training samples.
+
+    No secret redaction by design — the caller ensures only curated files are here.
+    """
+    if not vault_root.exists():
+        raise FileNotFoundError(f"ExactExtraction root does not exist: {vault_root}")
+    if not vault_root.is_dir():
+        raise NotADirectoryError(
+            f"ExactExtraction root is not a directory: {vault_root}"
+        )
+
+    md_files = iter_markdown_files(vault_root=vault_root, max_files=max_files)
+    records: List[Dict[str, str]] = []
+    skip_reasons: collections.Counter = collections.Counter()
+    files_scanned = 0
+    triplets_found = 0
+
+    for md_path in md_files:
+        if max_samples is not None and len(records) >= max_samples:
+            break
+
+        files_scanned += 1
+        try:
+            raw = md_path.read_text(encoding=encoding, errors="replace")
+        except Exception:
+            skip_reasons["file_read_error"] += 1
+            continue
+
+        extracted = parse_exact_extraction_records(raw)
+        triplets_found += len(extracted)
+
+        for rec in extracted:
+            if max_samples is not None and len(records) >= max_samples:
+                break
+            if not rec["instruction"].strip():
+                skip_reasons["empty_instruction"] += 1
+                continue
+            if not rec["output"].strip():
+                skip_reasons["empty_output"] += 1
+                continue
+            records.append(rec)
+
+    write_jsonl(records, output_path=output_path, encoding=encoding)
+
+    return PrepareSummary(
+        mode="exact_extraction",
+        total_input_records=triplets_found,
+        valid_records=len(records),
+        invalid_records=0,
+        issues=[],
+        files_found=len(md_files),
+        files_scanned=files_scanned,
+        sections_scanned=triplets_found,
+        samples_written=len(records),
+        skip_reasons=dict(skip_reasons),
+    )
+
+
 def prepare_vault_md_mode(
     vault_root: Path,
     output_path: Path,
@@ -546,6 +714,11 @@ def prepare_vault_md_mode(
                 skip_reasons[out_reason] += 1
                 continue
 
+            # C2: skip Map-of-Content / aliases-only outputs
+            if is_moc_only_output(output_text):
+                skip_reasons["moc_only_output"] += 1
+                continue
+
             input_text = build_input_context(source_path=rel_path, section=sec)
 
             if redact:
@@ -595,9 +768,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--mode",
-        choices=["jsonl", "vault_md"],
+        choices=["jsonl", "vault_md", "exact_extraction"],
         default="jsonl",
-        help="Preparation mode: jsonl (validate/normalize) or vault_md (extract from markdown vault).",
+        help=(
+            "Preparation mode: "
+            "jsonl (validate/normalize existing JSONL), "
+            "vault_md (extract from markdown vault sections), "
+            "exact_extraction (parse ## Instruction/Input/Output MD triplets)."
+        ),
     )
 
     # jsonl mode args
@@ -702,6 +880,20 @@ def main() -> None:
             redact=parse_bool_like(args.redact_secrets),
             encoding=args.encoding,
         )
+
+    elif args.mode == "exact_extraction":
+        if not args.vault_root:
+            raise ValueError("--vault-root is required in --mode exact_extraction")
+
+        vault_root = Path(args.vault_root)
+        summary = prepare_exact_extraction_mode(
+            vault_root=vault_root,
+            output_path=output_path,
+            max_files=args.max_files,
+            max_samples=max_samples,
+            encoding=args.encoding,
+        )
+
     else:
         raise ValueError(f"Unsupported mode: {args.mode}")
 
