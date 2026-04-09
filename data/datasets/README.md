@@ -1,104 +1,190 @@
-# Dataset Card (Local Training Data)
+# data/datasets/
 
 ## Zweck
-Dieses Verzeichnis enthält lokale Trainings-, Evaluations- und Self-Edit-Daten für `llm-homelab-training`.
 
-Es gibt aktuell zwei Datenfamilien:
+Dieses Verzeichnis enthält Datensätze und datensatznahe Artefakte für Training, Evaluation und vorbereitende Verarbeitungsschritte im Projekt `llm-homelab-training`.
 
-1. Standard-LoRA-Daten im Schema:
-   - `instruction`
-   - `input`
-   - `output`
-2. Self-Edit-Daten im erweiterten Schema gemäß:
-   - `src/datasets/schemas/self_edit.schema.json`
+Es dient als lokaler Arbeitsbereich für:
 
-## Provenance (Herkunft)
-- Quelle(n): **vom Projektbetreiber einzutragen**
-- Erstellungsdatum: **YYYY-MM-DD**
-- Erzeugt durch:
-  - manuell kuratierte Beispiele und/oder
-  - interne Skripte (z. B. `src/scripts/prepare_dataset.py`, `src/scripts/generate_self_edits.py`)
-- Version/Stand: **vX.Y / run-id / commit**
+- Trainingsdatensätze
+- Evaluationsdatensätze
+- generierte Zwischenstände aus der Datensatzaufbereitung
+- Prüf- und Berichtsdaten zur Dataset-Qualität
 
-## Nutzungskontext
-- Einsatz ausschließlich für lokales LoRA/Fine-Tuning, Evaluation und Self-Edit-Experimente in dieser Umgebung.
-- Keine automatische Weitergabe oder Veröffentlichung ohne separate Freigabe.
+Die Inhalte in diesem Verzeichnis können je nach Datei entweder:
 
-## Nutzungsbeschränkungen
-1. **Keine Secrets** (API-Keys, Passwörter, Tokens) in Datensätzen speichern.
-2. **Keine unzulässigen personenbezogenen Daten** ohne Rechtsgrundlage.
-3. **Nur lizenzkonforme Inhalte** verwenden (Quellenrecht prüfen).
-4. Daten nur für den definierten Projektzweck nutzen (Training/Eval/Self-Edit im Homelab).
-5. Bei Unsicherheit zur Datenherkunft: Datensatz nicht verwenden.
+1. **versionierte Referenzdaten** sein, oder
+2. **lokale, generierte Laufzeit-Artefakte** sein.
 
-## Qualitäts- und Formatregeln
+Die Unterscheidung ist für Betrieb, Cleanup und Auditierbarkeit relevant.
 
-### A) Standard-LoRA JSONL (`train.jsonl`)
-- Eine Zeile = ein JSON-Objekt.
-- Pflichtfelder:
-  - `instruction` (nicht leer)
-  - `output` (nicht leer)
-- Optional:
-  - `input` (String, darf leer sein)
-- UTF-8, deterministische Reihenfolge empfohlen.
+---
 
-### A2) Regression-Val JSONL (`val.jsonl`)
-- `val.jsonl` ist ein **Regression-Set** und folgt bewusst einem anderen Schema.
-- Eine Zeile = ein JSON-Objekt mit:
-  - `id` (z. B. `val-001`)
-  - `instruction` (nicht leer)
-  - `input` (String, leer erlaubt)
-  - `expected_contains` (Liste mit 1–3 erwarteten Substrings)
-  - `tags` (Liste, z. B. `["regression"]`)
-- Beispielschema:
-  - `{"id":"val-001","instruction":"...","input":"","expected_contains":["..."],"tags":["regression"]}`
-- Zweck:
-  - deterministische, substring-basierte Regressionsprüfung über `eval_val.py`
-  - nicht als direktes LoRA-Trainingslabel-Set (`output`) gedacht.
+## Grundregel
 
-### B) Self-Edit JSONL (`self_edit_train.jsonl`, `self_edit_val.jsonl`)
-- Eine Zeile = ein JSON-Objekt im Self-Edit-Schema.
-- Wichtige Pflichtfelder (Auszug):
-  - `record_id`
-  - `source_sample_id`
-  - `created_at`
-  - `instruction`
-  - `input`
-  - `original_output`
-  - `edited_output`
-  - `edit_rationale`
-  - `status` (`draft|accepted|rejected`)
-  - `audit` (inkl. `event_id`, `event_ts`, `actor_type`, `pipeline`, `base_model`)
+Nicht jede Datei in `data/datasets/` ist gleich zu behandeln.
 
-## Aktuell vorhandene Starter-Dateien
-- `train.jsonl` – Starter-Trainingsdaten (LoRA, `instruction/input/output`)
-- `val.jsonl` – Regression-Validierungsdaten (`id/instruction/input/expected_contains/tags`)
-- `self_edit_train.jsonl` – Starter-Self-Edit-Trainingsdaten
-- `self_edit_val.jsonl` – Starter-Self-Edit-Validierungsdaten
+### A) Versionierte Referenzdateien
+Diese Dateien bilden einen stabilen, prüfbaren Projektstand ab und dürfen bewusst im Repository liegen.
 
-## Usage Flow (empfohlen)
+Beispiele:
 
-1. **LoRA-Baseline validieren**
-   - Optional: `src/scripts/prepare_dataset.py` auf `train.jsonl`/`val.jsonl`
-   - Training starten mit `configs/train_lora_3b_k80.yaml`
+- `val.jsonl`
+- `runbook_samples.jsonl`
+- `exact_extraction_samples.jsonl`
 
-2. **Baseline evaluieren (zwei Pfade)**
-   - Klassische Eval mit `src/scripts/eval.py` benötigt ein `output`-basiertes Eval-Set.
-   - Regression-Eval mit `src/scripts/eval_val.py` nutzt `val.jsonl` (`expected_contains`-Schema).
-   - Reports unter `data/evals/` prüfen.
+Diese Dateien dienen u. a. als:
 
-3. **Self-Edit-Daten prüfen**
-   - `self_edit_train.jsonl` und `self_edit_val.jsonl` gegen `self_edit.schema.json` validieren
-   - `accepted`/`rejected` Verteilung und Edit-Qualität prüfen
+- Regression-Referenz
+- Seed-Daten
+- kontrollierte Eingaben für reproduzierbare Tests
 
-4. **Self-Edit-Pipeline iterativ ausbauen**
-   - `src/scripts/generate_self_edits.py` als Ausgangspunkt
-   - später: Generate -> Critique -> Edit -> Verify -> Curate
+### B) Generierte Laufzeitdateien
+Diese Dateien entstehen bei Prepare-, Merge-, Validate- oder Trainingsläufen und sind in der Regel **nicht** als dauerhafte Referenz gedacht.
 
-## Audit-Hinweis
-Für jeden Trainings- oder Self-Edit-Lauf dokumentieren:
-- Datensatzdatei + Hash (z. B. SHA256)
-- Quelle/Version
-- Run-ID und verwendete Konfiguration
-- Basismodell und ggf. Adapter-Referenz
-- bei Self-Edit zusätzlich: Anteil `accepted` vs. `rejected`
+Beispiele:
+
+- `train.jsonl`
+- `train_vault.jsonl`
+- `train.normalized.jsonl`
+- `prepare_report.json`
+- `prepare_vault_report.json`
+- `merge_report.json`
+- `val_validate_report.json`
+- `self_edits.jsonl`
+- `self_edits.report.json`
+
+Diese Dateien dürfen bei einem Runtime-Reset oder vor einem neuen End-to-End-Test entfernt und neu erzeugt werden.
+
+---
+
+## Typische Inhalte
+
+### Trainingsdatensätze
+Datensätze für LoRA-/Fine-Tuning-Läufe.
+
+Beispiele:
+
+- `train.jsonl`
+- `train_vault.jsonl`
+
+### Evaluations- und Referenzdatensätze
+Kleine, kontrollierte Datensätze zur fachlichen oder technischen Bewertung.
+
+Beispiele:
+
+- `val.jsonl`
+
+### Seed- und Ergänzungsdaten
+Gezielt gepflegte Zusatzdaten für bestimmte Wissensbereiche oder Extraktionsmuster.
+
+Beispiele:
+
+- `runbook_samples.jsonl`
+- `exact_extraction_samples.jsonl`
+
+### Reports und Validierungsergebnisse
+Prüfberichte über Datensatzstruktur, Erzeugung oder Merge-Ergebnisse.
+
+Beispiele:
+
+- `prepare_report.json`
+- `merge_report.json`
+- `val_validate_report.json`
+
+---
+
+## Erwartete Formate
+
+### JSONL
+Das Standardformat für Trainingsdaten ist UTF-8 codiertes JSONL.
+
+Erwartetes Schema pro Zeile:
+
+```/dev/null/dataset-schema.jsonl#L1-1
+{"instruction":"...","input":"...","output":"..."}
+```
+
+Pflichtfelder:
+
+- `instruction` als nicht-leerer String
+- `output` als nicht-leerer String
+
+Optional:
+
+- `input` als String, leer erlaubt
+
+### Regression-Eval Format
+Für `val.jsonl` gelten zusätzliche fachliche Felder, z. B.:
+
+```/dev/null/val-schema.jsonl#L1-1
+{"id":"val-001","instruction":"...","input":"","expected_contains":["..."],"tags":["regression","openbook"]}
+```
+
+---
+
+## Betriebsregeln
+
+1. Keine Secrets, Tokens oder Zugangsdaten in Datensatzdateien speichern.
+2. Generierte Trainingsdaten dürfen überschrieben oder bei Reset entfernt werden.
+3. Versionierte Referenzdatensätze dürfen nicht versehentlich durch Laufzeitprozesse zerstört werden.
+4. Datensatzänderungen mit Einfluss auf Reproduzierbarkeit müssen dokumentiert und nachvollziehbar sein.
+5. Datensatzquellen aus externen Vaults oder Host-Mounts sind als Eingangsquellen zu behandeln, nicht als Repository-Source-of-Truth.
+
+---
+
+## Cleanup / Reset
+
+Bei einem vollständigen Runtime-Reset werden typischerweise **generierte** Datensatzartefakte entfernt und später neu erzeugt.
+
+Erhalten bleiben sollen in der Regel:
+
+- `README.md`
+- `val.jsonl`
+- `runbook_samples.jsonl`
+- `exact_extraction_samples.jsonl`
+- `.gitkeep` (falls vorhanden)
+
+Entfernt werden dürfen je nach Reset-Modus insbesondere:
+
+- `train.jsonl`
+- `train_vault.jsonl`
+- `train.normalized.jsonl`
+- vorbereitende Reports
+- temporäre Self-Edit-Dateien
+
+---
+
+## Audit- und Nachvollziehbarkeit
+
+Wenn Datensätze neu erzeugt oder verändert werden, sollten folgende Punkte nachvollziehbar sein:
+
+- Quelle der Eingabedaten
+- verwendeter Verarbeitungsschritt / Befehl
+- Zeitpunkt der Erzeugung
+- Zielpfad
+- Anzahl erzeugter Samples
+- relevante Skip- oder Filtergründe
+
+Für reproduzierbare Projektstände gilt:
+Nicht nur der Datensatz selbst, sondern auch die Erzeugungslogik und ihre Reports sind fachlich relevant.
+
+---
+
+## Hinweis für Bedienung und Betrieb
+
+Dieses Verzeichnis ist ein Arbeitsbereich für Datenpipeline und Training, kein beliebiger Ablageort.
+
+Neue Dateien in diesem Verzeichnis sollten vorab klar eingeordnet werden als:
+
+- Referenzdatei
+- generiertes Artefakt
+- Bericht
+- temporärer Zwischenstand
+
+Wenn diese Einordnung nicht klar ist, steigt das Risiko für:
+
+- Drift
+- fehlerhafte Cleanup-Prozesse
+- unklare Reproduzierbarkeit
+- versehentliches Committen oder Löschen wichtiger Daten

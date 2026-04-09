@@ -70,7 +70,7 @@ SWAP_GATE_MEM_MIN_KB ?= 2000000
 	real-run-short real-run-continue run-status nightly-run promote-latest-ok \
 	serve-up serve-down serve-logs serve-health serve-reload \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
-	retention-clean clean-smoke clean-data
+	retention-clean clean-smoke clean-data reset-runtime
 
 help:
 	@echo "Targets:"
@@ -114,7 +114,8 @@ help:
 	@echo "  smoke                      - End-to-end smoke workflow (check/build/up/train/infer/report)"
 	@echo "  retention-clean            - Keep only latest N run-like dirs in models/logs/evals (default N=3)"
 	@echo "  clean-smoke                - Remove smoke outputs"
-	@echo "  clean-data                 - Remove generated datasets/evals/logs/models (keeps data/README.md)"
+	@echo "  clean-data                 - Remove generated datasets/evals/logs/models and reset runtime pointers"
+	@echo "  reset-runtime              - Stop serving/training containers and reset runtime state for fresh E2E tests"
 
 preflight: check-docker check-gpu-host check-paths ensure-data-dirs
 
@@ -568,6 +569,7 @@ serve-reload:
 nightly-run: preflight validate-val prepare-dataset-augmented check-single-flight
 	@set -e; \
 	$(MAKE) lock-status; \
+	$(MAKE) swap-gate-eval; \
 	if [ "$(NIGHTLY_APPLY_CPU_LIMIT)" = "1" ]; then \
 		$(MAKE) limit-cpu; \
 	else \
@@ -580,6 +582,7 @@ nightly-run: preflight validate-val prepare-dataset-augmented check-single-fligh
 		echo "INFO: nightly-run start mode=fresh-short (no promoted adapter available)"; \
 		$(MAKE) real-run-short; \
 	fi; \
+	$(MAKE) swap-gate-eval; \
 	$(MAKE) eval-val; \
 	PREV_OK_ID=""; \
 	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then PREV_OK_ID=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); fi; \
@@ -721,4 +724,17 @@ clean-smoke:
 clean-data:
 	@find data -mindepth 1 -maxdepth 1 ! -name README.md -exec rm -rf {} +
 	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR)
-	@echo "OK: cleaned generated data artifacts (kept data/README.md)"
+	@touch $(LATEST_OK_ADAPTER_ID_FILE)
+	@echo "data/models/<run-id>" > $(LATEST_OK_ADAPTER_PATH_FILE)
+	@rm -f $(LATEST_REALRUN_ID_FILE) $(RUN_STATE_DIR)/LATEST_EVAL_RUN_ID $(LATEST_PROMOTION_SUMMARY_FILE) $(RUN_LOCK_FILE)
+	@echo "OK: cleaned generated data artifacts and reset runtime pointers (kept data/README.md)"
+
+reset-runtime:
+	@set -e; \
+	echo "INFO: stopping serving stack (if running)"; \
+	$(SERVE_COMPOSE) down || true; \
+	echo "INFO: stopping training stack (if running)"; \
+	$(COMPOSE) down || true; \
+	echo "INFO: clearing runtime state for fresh E2E run"; \
+	$(MAKE) clean-data; \
+	echo "OK: runtime reset completed"

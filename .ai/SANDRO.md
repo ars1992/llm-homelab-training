@@ -88,6 +88,9 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
 - [ ] Keine Secrets oder lokale Artefakte im Repo
 - [ ] Produktions- und Trainingspointer fachlich getrennt (`LATEST_REALRUN_ID` vs. `LATEST_OK_ADAPTER_ID`)
 - [ ] Retention schützt produktive Referenzen und entfernt keine promoteten Adapter unbeabsichtigt
+- [ ] Für neue Betriebsmodi zusätzlich eine kurze, kompakte Inbetriebnahme-Checkliste in `.ai/` anlegen
+- [ ] `.env.example` nur mit tatsächlich genutzten oder bewusst optionalen Variablen pflegen; Alt-/Scheinfelder entfernen
+- [ ] Bei Environment-Variablen zwischen aktiver technischer Nutzung, dokumentarischem Zweck und Zukunftsoption explizit unterscheiden
 
 ---
 
@@ -150,6 +153,22 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - `retention-clean` muss sowohl `LATEST_REALRUN_ID` als auch `LATEST_OK_ADAPTER_ID` schützen
   - Lernpunkt für zukünftige Sessions:
     - bei produktionsnahen ML-Systemen technische Laufhistorie und stabile Serving-Freigabe immer als getrennte Zustände modellieren
+    - für neue Betriebsmodi neben Architektur- und Kontextdoku immer auch eine kompakte Inbetriebnahme-Checkliste in `.ai/` pflegen
+    - `.env.example` als echte Betriebsvorlage behandeln und nicht als unverbindliche Sammelstelle für unverdrahtete Variablen
+
+- 2026-04-10:
+  - Environment-Template-Regel für `llm-homelab-training` präzisiert:
+    - `.env.example` soll nur Variablen enthalten, die aktuell technisch genutzt werden oder bewusst als optionale Betriebsparameter vorgesehen sind.
+    - Variablen ohne aktive Verdrahtung im Compose-/Make-/Code-Pfad sind als Drift-/Verwirrungsquelle zu behandeln und zu entfernen oder sauber als zukünftige Option zu kennzeichnen.
+  - Prüfreihenfolge für Environment-Dateien festgelegt:
+    - 1) Wird die Variable in Compose-Dateien referenziert?
+    - 2) Wird sie in Makefile oder Code tatsächlich ausgewertet?
+    - 3) Ist sie nur dokumentarisch erwähnt?
+    - 4) Ist ihr Status im Template klar erkennbar?
+  - Qualitätsregel ergänzt:
+    - `.env.example` muss den tatsächlichen Betriebsstand von Training und Serving widerspiegeln, einschließlich `SERVE_PORT`, `BASE_MODEL`, `LATEST_OK_POINTER` und `HEALTH_PATH`, wenn diese im Compose-Stack verwendet werden.
+  - Wartungsprinzip dokumentiert:
+    - Environment-Templates regelmäßig gegen reale Compose-/Runtime-Nutzung abgleichen, damit Setup-Dokumentation und technische Verdrahtung nicht auseinanderlaufen.
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.

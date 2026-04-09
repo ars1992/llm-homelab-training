@@ -52,6 +52,39 @@ Optional:
 1. `.env` anlegen:
 `cp .env.example .env`
 
+Hinweis zur Nutzung von `.env`:
+- `.env` dient als lokale Override-Datei für Docker-Compose-Parameter und wird für host-spezifische Anpassungen verwendet.
+- Der Basisbetrieb ist auch ohne eigene `.env` möglich, da die Compose-Dateien Default-Werte über `${VAR:-default}` definieren.
+- `.env.example` ist dennoch verbindliche Vorlage für reproduzierbare lokale Setups und dokumentiert die aktuell unterstützten Override-Variablen.
+
+Aktiv genutzte Variablen im aktuellen Projektstand:
+- Training / Compose:
+  - `NVIDIA_VISIBLE_DEVICES`
+  - `CUDA_VISIBLE_DEVICES`
+  - `NVIDIA_DRIVER_CAPABILITIES`
+  - `HF_HOME`
+  - `HF_DATASETS_CACHE`
+  - `TRANSFORMERS_CACHE`
+  - `TENSORBOARD_PORT`
+- Serving / Compose:
+  - `NVIDIA_VISIBLE_DEVICES`
+  - `CUDA_VISIBLE_DEVICES`
+  - `NVIDIA_DRIVER_CAPABILITIES`
+  - `HF_HOME`
+  - `HF_DATASETS_CACHE`
+  - `TRANSFORMERS_CACHE`
+  - `SERVE_PORT`
+  - `SERVE_HOST`
+  - `BASE_MODEL`
+  - `LATEST_OK_POINTER`
+  - `HEALTH_PATH`
+- Optional lokal wirksam:
+  - `COMPOSE_PROJECT_NAME`
+
+Nicht als aktive technische Steuerung verwenden, solange keine explizite Verdrahtung im Projekt erfolgt:
+- `TRAIN_CONFIG`
+- `TRAIN_DATA_PATH`
+
 2. Host-Preflight prüfen:
 `make preflight`
 
@@ -298,6 +331,108 @@ Verbindliche Reihenfolge:
 - Promotion ist von Eval-Erfolg abhängig.
 - Serving wird nur bei neuer Promotion aktualisiert.
 - Retention muss mindestens `LATEST_REALRUN_ID` und `LATEST_OK_ADAPTER_ID` schützen.
+
+## Runtime-Reset für neuen End-to-End-Test
+
+### Zweck
+Vor einem neuen vollständigen End-to-End-Test kann ein lokaler Runtime-Reset erforderlich sein, um alte Modelle, Logs, Eval-Artefakte und Pointer-Zustände zu entfernen.
+
+### Ziel
+Der Reset muss:
+1. lokale Laufzeit-Artefakte entfernen
+2. Serving stoppen
+3. Pointer-Dateien in einen leeren, definierten Ausgangszustand zurücksetzen
+4. den nächsten Testlauf deterministisch vorbereiten
+
+### Minimaler Reset (aktueller Stand)
+Bereits vorhanden:
+- `make clean-data`
+- `make clean-smoke`
+
+Der aktuelle `clean-data`-Stand entfernt generierte Inhalte unter `data/` und legt die Grundstruktur neu an.
+
+### Bewertung des aktuellen Standes
+Der aktuelle Reset ist für einen vollständigen Neustart **nur teilweise ausreichend**, da zusätzlich sichergestellt werden muss:
+- `serve` ist gestoppt
+- `LATEST_OK_ADAPTER_ID` ist leer
+- `LATEST_OK_ADAPTER_PATH` ist auf den Platzhalterzustand zurückgesetzt
+- `LATEST_REALRUN_ID` und `LATEST_EVAL_RUN_ID` sind für einen echten Neustart entfernt oder bewusst neu initialisiert
+- alte Promotionsmetadaten sind entfernt
+
+### Zielbild für Reset-Workflow
+Für wiederholbare Neustarts und spätere Cron-/Nightly-Nutzung soll ein dedizierter Reset-Ablauf existieren mit folgender Reihenfolge:
+1. `make serve-down`
+2. Runtime-Artefakte unter `data/models/`, `data/logs/`, `data/evals/`, flüchtige Datensätze und Run-Zustände entfernen
+3. `data/runs/LATEST_OK_ADAPTER_ID` leeren
+4. `data/runs/LATEST_OK_ADAPTER_PATH` auf `data/models/<run-id>` zurücksetzen
+5. `data/runs/LATEST_REALRUN_ID`, `data/runs/LATEST_EVAL_RUN_ID` und `data/runs/LATEST_PROMOTION_SUMMARY.json` entfernen oder kontrolliert neu initialisieren
+6. Datenverzeichnisstruktur erneut anlegen
+
+### Betriebsregel
+- Ein Runtime-Reset ist eine **destruktive Aktion** und darf nur bewusst vor Neuinitialisierung, Testwiederholung oder kontrolliertem Nightly-Betrieb erfolgen.
+- Für Cron-/Nightly-Betrieb ist ein dediziertes Reset-Skript dem manuellen Löschen einzelner Dateien vorzuziehen.
+- Reset und reguläre Retention sind unterschiedliche Prozesse:
+  - `retention-clean` = selektives Aufräumen bei Erhalt relevanter Runs
+  - Runtime-Reset = vollständige Rücksetzung des lokalen Laufzeitzustands
+
+### Erwarteter Zielzustand nach Reset
+- `data/models/` leer
+- `data/logs/` leer
+- `data/evals/` leer
+- `data/runs/LATEST_OK_ADAPTER_ID` leer
+- `data/runs/LATEST_OK_ADAPTER_PATH` enthält nur den Platzhalter `data/models/<run-id>`
+- kein alter Serving-Prozess aktiv
+- nächster Lauf startet als definierter Fresh-Start
+
+### Offene Umsetzung
+Ein dediziertes Reset-Skript bzw. Make-Target für diesen vollständigen Runtime-Reset ist als Betriebsbaustein sinnvoll und für Cron-/Nightly-Szenarien vorgesehen.
+
+## Vault-Dataset-Generierung (15 Dokumentation)
+## Umgebungsdatei `.env` (verbindliche Einordnung)
+
+### Zweck
+Die Datei `.env` ist in diesem Projekt keine fachliche Primärkonfiguration für Training oder Evaluation, sondern eine lokale Override-Schicht für Docker Compose und host-spezifische Betriebsparameter.
+
+### Aktuelle Nutzung
+Technisch ausgewertet werden derzeit nur Variablen, die in `docker/compose.yaml` oder `docker/compose.serve.yaml` referenziert sind.
+
+#### Aktiv genutzte Variablen
+- Training:
+  - `NVIDIA_VISIBLE_DEVICES`
+  - `CUDA_VISIBLE_DEVICES`
+  - `NVIDIA_DRIVER_CAPABILITIES`
+  - `HF_HOME`
+  - `HF_DATASETS_CACHE`
+  - `TRANSFORMERS_CACHE`
+  - `TENSORBOARD_PORT`
+- Serving:
+  - `SERVE_PORT`
+  - `SERVE_HOST`
+  - `BASE_MODEL`
+  - `LATEST_OK_POINTER`
+  - `HEALTH_PATH`
+
+#### Optional / indirekt genutzt
+- `COMPOSE_PROJECT_NAME`
+  - wirkt als Docker-Compose-Projektname, sofern lokal gesetzt
+
+#### Nicht aktiv verdrahtete Alt-/Vorlagevariablen
+- `BASE_MODEL_NAME`
+- `TRAIN_CONFIG`
+- `TRAIN_DATA_PATH`
+
+### Betriebsregel
+- `.env.example` ist die dokumentierte Vorlage.
+- `.env` bleibt lokal und wird nicht committed.
+- Neue Variablen dürfen nur dann in `.env.example` aufgenommen werden, wenn sie tatsächlich in Compose, Skripten oder dokumentierten Betriebsabläufen verwendet werden.
+- Nicht mehr verdrahtete Variablen sind aus `.env.example` zu entfernen, um Scheinkonfigurationen zu vermeiden.
+
+### Prüfregel
+Wenn `.env` geändert wird, ist zu prüfen:
+1. Wird die Variable technisch referenziert?
+2. Gehört sie zum Training, Serving oder nur zu lokalem Host-Betrieb?
+3. Ist ein Default im Compose-Stack definiert?
+4. Ist die Variable in `README.md` und `.ai/CONTEXT.md` konsistent dokumentiert?
 
 ## Vault-Dataset-Generierung (15 Dokumentation)
 - Quelle (Host): `/mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation/`
