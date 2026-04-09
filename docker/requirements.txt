@@ -30,5 +30,10 @@ tqdm==4.66.2
 numpy==1.24.4
 psutil==7.2.2
 
+# Serving API
+fastapi==0.110.0
+uvicorn==0.29.0
+pydantic==2.6.4
+
 # Optional (disabled by default on K80 due to compatibility risk):
 # bitsandbytes==0.41.1 ; platform_system == "Linux"

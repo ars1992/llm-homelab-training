@@ -1,0 +1,48 @@
+name: llm-homelab-serving
+
+services:
+  serve:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: llm-homelab-serve
+    working_dir: /workspace
+    command:
+      - python
+      - -m
+      - uvicorn
+      - src.serve.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8901"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+      HF_HOME: ${HF_HOME:-/workspace/.cache/huggingface}
+      HF_DATASETS_CACHE: ${HF_DATASETS_CACHE:-/workspace/.cache/huggingface/datasets}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/workspace/.cache/huggingface/transformers}
+      SERVE_PORT: ${SERVE_PORT:-8901}
+      SERVE_HOST: ${SERVE_HOST:-0.0.0.0}
+      BASE_MODEL: ${BASE_MODEL:-facebook/opt-2.7b}
+      LATEST_OK_POINTER: ${LATEST_OK_POINTER:-/workspace/data/runs/LATEST_OK_ADAPTER_ID}
+      HEALTH_PATH: ${HEALTH_PATH:-/health}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../src:/workspace/src:ro
+      - ../configs:/workspace/configs:ro
+      - ../data:/workspace/data:ro
+      - ../.cache:/workspace/.cache
+    gpus: all
+    ports:
+      - "${SERVE_PORT:-8901}:8901"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8901/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped

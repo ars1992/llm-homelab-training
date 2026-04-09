@@ -14,7 +14,7 @@ Der aktuelle Fokus ist ein stabiler MVP-Trainingspfad; darauf aufbauend folgt ei
 
 ## Ordner-Overview
 - `docker/`  
-  Container-Stack (`Dockerfile`, `compose.yaml`, gepinnte Dependencies)
+  Container-Stack (`Dockerfile`, `compose.yaml`, `compose.serve.yaml`, gepinnte Dependencies)
 - `src/scripts/`  
   Trainings-, Datenvorbereitungs-, Self-Edit- und Eval-Skripte
 - `src/datasets/schemas/`  
@@ -28,11 +28,11 @@ Der aktuelle Fokus ist ein stabiler MVP-Trainingspfad; darauf aufbauend folgt ei
 - `scripts/`  
   Betriebsnahe Prüfscripte (u. a. `check_gpu.sh` für Preflight)
 - `Makefile`  
-  Standardisierte Targets für Preflight, Smoke, Training, Retention, Recovery (`swap-reset`) und Betrieb
+  Standardisierte Targets für Preflight, Smoke, Training, Eval, Promotion, Serving, Retention, Recovery (`swap-reset`) und Betrieb
 - `data/`  
   Lokale, nicht versionierte Artefakte: Datensätze, Modelle, Logs
 - `.ai/`  
-  Architektur-/Kontextdokumente und Guidelines
+  Architektur-/Kontextdokumente, Betriebsleitlinien und Guidelines
 
 ## Datenformat (MVP Training)
 Erwartetes JSONL pro Zeile:
@@ -81,8 +81,8 @@ Der Smoke-Workflow führt deterministisch aus:
 `make real-run-short` oder `make real-run-continue`
 
 Hinweis zu Continue-Priorität und Stabilitäts-Gates:
-- `make real-run-continue` priorisiert als Startpunkt den neuesten **Real-Run Adapter** (`data/models/real-*` mit `adapter_config.json`).
-- Falls kein geeigneter Real-Run vorhanden ist, greift ein Fallback auf den nächsten verfügbaren gültigen Adapter.
+- `make real-run-continue` verwendet als Startpunkt ausschließlich den aktuell promoteten Adapter aus `data/runs/LATEST_OK_ADAPTER_ID`.
+- Falls kein promoteter Adapter vorhanden ist oder der referenzierte Adapter ungültig ist, greift ein deterministischer Fallback auf `make real-run-short`.
 - Vor Heavy-Steps greifen Single-Flight und Swap-Gates:
   - Single-Flight-Lock (`data/runs/LOCK`) verhindert parallele Train/Eval-Läufe.
   - Swap-Gate prüft `MemAvailable` und `SwapFree` vor Training/Eval.
@@ -104,6 +104,10 @@ Hinweis zu Continue-Priorität und Stabilitäts-Gates:
 - Trainingslogs: `data/logs/<run-id>/`
 - Smoke-Run Status/Metadaten: `data/runs/smoke/report.txt`
 - Smoke-Eval-Artefakte: `data/evals/smoke-*/`
+- Letzter technischer Real-Run Pointer: `data/runs/LATEST_REALRUN_ID`
+- Letzter fachlich freigegebener Adapter Pointer: `data/runs/LATEST_OK_ADAPTER_ID`
+- Optional abgeleiteter Adapter-Pfad: `data/runs/LATEST_OK_ADAPTER_PATH`
+- Letzte Promotionsentscheidung: `data/runs/LATEST_PROMOTION_SUMMARY.json`
 
 ## Hinweise zu K80
 - Kleine Batchgrößen verwenden
@@ -231,6 +235,69 @@ Nach jedem Real-Run dokumentieren:
   - `val_report.json` vorhanden
   - Passrate und Fail-Cases im Report nachvollziehbar
   - Bei niedriger Passrate: gezielte Datensatz-/Prompt-Verbesserung statt Infrastrukturänderung
+
+## Serving-Architektur (MVP, getrennt vom Training)
+- Serving läuft als separater Docker-Compose-Stack über `docker/compose.serve.yaml`.
+- Service-Name: `serve`
+- Standard-Port: `8901`
+- Health-Endpunkt: `/health`
+- Inferenz-Endpunkt: `POST /v1/chat/completions`
+- Optionaler Reload-Endpunkt: `POST /reload`
+- Serving liest beim Start den freigegebenen Adapter aus `data/runs/LATEST_OK_ADAPTER_ID`.
+- Aus dem Pointer wird deterministisch `data/models/<run-id>` abgeleitet.
+- Serving nutzt **nicht** automatisch den letzten technischen Real-Run, sondern ausschließlich den zuletzt evaluierten und promoteten Adapter.
+- Betriebsregel: Serving darf für den Nightly-Trainingszeitraum gestoppt bzw. neu gestartet werden; Parallelbetrieb mit Training ist für den MVP nicht erforderlich.
+
+### Serving-Make-Targets
+- `make serve-up`
+- `make serve-down`
+- `make serve-logs`
+- `make serve-health`
+- `make serve-reload`
+
+### OpenClaw-Anbindung
+- OpenClaw spricht den Serving-Service über die OpenAI-kompatible API an.
+- Erwarteter Betriebsmodus: stabile Nutzung gegen den aktuell promoteten Adapter, keine direkte Kopplung an den Trainingscontainer.
+
+## Promotion- und Pointer-Disziplin (verbindlich)
+- Jeder Trainingslauf schreibt eine neue `run_id` und erzeugt einen neuen Adapter-Ordner.
+- `LATEST_REALRUN_ID` dokumentiert den letzten technisch erfolgreichen Real-Run.
+- `LATEST_OK_ADAPTER_ID` dokumentiert den letzten fachlich freigegebenen Adapter für Serving.
+- Promotion erfolgt nur nach erfolgreicher Regression-Eval.
+- Wenn eine Promotion fehlschlägt oder die Schwellenwerte nicht erreicht werden, bleibt `LATEST_OK_ADAPTER_ID` unverändert.
+- Folge: Serving bleibt stabil, auch wenn der neueste Trainingslauf fachlich nicht ausreichend ist.
+
+### Aktuelle Start-Schwellenwerte für Promotion
+- `pass_rate_exact_openbook >= 0.60`
+- `avg_coverage_runbook_openbook >= 0.30`
+
+### Audit-Artefakte der Promotion
+- Referenzierter Kandidat: `data/runs/LATEST_REALRUN_ID`
+- Letzter Eval-Run Pointer: `data/runs/LATEST_EVAL_RUN_ID`
+- Promotionszusammenfassung: `data/runs/LATEST_PROMOTION_SUMMARY.json`
+
+## Nightly-Run Zielablauf (Sonntag, MVP)
+Verbindliche Reihenfolge:
+1. `make preflight`
+2. `make lock-status`
+3. `make check-single-flight`
+4. `make validate-val`
+5. `make prepare-dataset-augmented`
+6. Trainingsstart:
+   - `make real-run-continue`, wenn `LATEST_OK_ADAPTER_ID` auf einen gültigen Adapter zeigt
+   - sonst `make real-run-short`
+7. `make eval-val`
+8. `make promote-latest-ok`
+9. Wenn ein neuer Adapter promotet wurde:
+   - Serving wird neu gestartet
+10. `make retention-clean`
+
+### Nightly-Betriebsregeln
+- Es wird nie ein bestehender Adapter-Ordner überschrieben.
+- Continue-Training erfolgt ausschließlich vom letzten promoteten Adapter.
+- Promotion ist von Eval-Erfolg abhängig.
+- Serving wird nur bei neuer Promotion aktualisiert.
+- Retention muss mindestens `LATEST_REALRUN_ID` und `LATEST_OK_ADAPTER_ID` schützen.
 
 ## Vault-Dataset-Generierung (15 Dokumentation)
 - Quelle (Host): `/mnt/qnap/Obsidian_Vaults/Work/0 Seeds/15 Dokumentation/`

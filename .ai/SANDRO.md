@@ -86,6 +86,8 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
 - [ ] Audit-/Nachvollziehbarkeit berücksichtigt
 - [ ] Offene Fragen explizit gelistet
 - [ ] Keine Secrets oder lokale Artefakte im Repo
+- [ ] Produktions- und Trainingspointer fachlich getrennt (`LATEST_REALRUN_ID` vs. `LATEST_OK_ADAPTER_ID`)
+- [ ] Retention schützt produktive Referenzen und entfernt keine promoteten Adapter unbeabsichtigt
 
 ---
 
@@ -101,6 +103,53 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
 ---
 
 ## Änderungslog
+
+- 2026-04-09:
+  - Serving-/Promotion-Architektur für `llm-homelab-training` als neuer MVP-Betriebsstandard festgelegt.
+  - Zielbild präzisiert:
+    - Sonntäglicher automatisierter Trainingslauf (`nightly-run`)
+    - jeder Trainingslauf erzeugt eine neue Run-ID und einen neuen Adapter-Ordner
+    - Serving läuft als separater Docker-Service `serve`
+    - Serving nutzt ausschließlich den promoteten Pointer `data/runs/LATEST_OK_ADAPTER_ID`
+    - OpenClaw spricht den Serving-Endpunkt über eine OpenAI-kompatible API an
+  - Verbindliche Trennung von technischer und fachlicher Referenz eingeführt:
+    - `LATEST_REALRUN_ID` = letzter technisch erfolgreicher Real-Run
+    - `LATEST_OK_ADAPTER_ID` = letzter fachlich freigegebener Adapter für Serving
+    - `LATEST_OK_ADAPTER_PATH` nur abgeleitete Hilfsreferenz, nicht Source-of-Truth
+  - Promotionsregel dokumentiert:
+    - Promotion nur nach `make eval-val`
+    - Default-Thresholds:
+      - `pass_rate_exact_openbook >= 0.60`
+      - `avg_coverage_runbook_openbook >= 0.30`
+    - Bei Fail bleibt `LATEST_OK_ADAPTER_ID` unverändert; Serving bleibt stabil
+  - Continue-Trainingsregel verschärft:
+    - `make real-run-continue` startet nur von `LATEST_OK_ADAPTER_ID`
+    - wenn kein promoteter Adapter vorhanden ist: Fallback auf `make real-run-short`
+  - Serving-MVP dokumentiert:
+    - separates Compose-File `docker/compose.serve.yaml`
+    - Service `serve`
+    - Health-Endpunkt `/health`
+    - OpenAI-kompatibler MVP-Endpunkt `POST /v1/chat/completions`
+    - optionaler Reload-Endpunkt `POST /reload`
+    - Default-Port `8901`
+  - Nightly-Orchestrierung angepasst:
+    - `preflight`
+    - `lock-status`
+    - `check-single-flight`
+    - `validate-val`
+    - `prepare-dataset-augmented`
+    - Train (`real-run-continue` von `LATEST_OK`, sonst `real-run-short`)
+    - `eval-val`
+    - `promote-latest-ok`
+    - bei neuer Promotion Neustart des Serving-Service
+    - `retention-clean`
+  - Betriebsentscheidung bestätigt:
+    - Serving darf während Nightly-Training heruntergefahren werden
+    - Parallelbetrieb von Training und Serving ist auf K80 nicht erforderlich
+  - Retention-Regel erweitert:
+    - `retention-clean` muss sowohl `LATEST_REALRUN_ID` als auch `LATEST_OK_ADAPTER_ID` schützen
+  - Lernpunkt für zukünftige Sessions:
+    - bei produktionsnahen ML-Systemen technische Laufhistorie und stabile Serving-Freigabe immer als getrennte Zustände modellieren
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.

@@ -28,7 +28,7 @@ Randbedingungen:
 
 Wir verwenden als Basis:
 
-- `nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu22.04`
+- `nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04`
 
 Begründung:
 
@@ -98,7 +98,7 @@ Daraus wurde als verbindliche Entscheidung abgeleitet:
 
 Verbindlich zu pinnen:
 
-1. Base-Image inkl. Tag (`nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04`)
+1. Base-Image inkl. Tag (`nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04`)
 2. Python-Paketversionen in `docker/requirements.txt`
 3. Bootstrapping-Tooling (`pip`, `setuptools`, `wheel`) im Dockerfile
 4. Trainingsrelevante Defaults in `configs/` (z. B. Precision, Batch, GradAccum, SeqLen)

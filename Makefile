@@ -27,10 +27,20 @@ REALRUN_CONFIG := configs/train_lora_3b_k80_short.yaml
 REALRUN_DATASET := data/datasets/train.jsonl
 RUN_STATE_DIR := data/runs
 LATEST_REALRUN_ID_FILE := $(RUN_STATE_DIR)/LATEST_REALRUN_ID
+LATEST_OK_ADAPTER_ID_FILE := $(RUN_STATE_DIR)/LATEST_OK_ADAPTER_ID
+LATEST_OK_ADAPTER_PATH_FILE := $(RUN_STATE_DIR)/LATEST_OK_ADAPTER_PATH
+LATEST_PROMOTION_SUMMARY_FILE := $(RUN_STATE_DIR)/LATEST_PROMOTION_SUMMARY.json
 
 VAL_REG_CONFIG := configs/datasets/val_regression.yaml
 VAL_REG_DATASET := data/datasets/val.jsonl
 VAL_REG_OUTPUT_ROOT := data/evals
+PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK ?= 0.60
+PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK ?= 0.30
+SERVE_COMPOSE_FILE := docker/compose.serve.yaml
+SERVE_COMPOSE := docker compose -f $(SERVE_COMPOSE_FILE)
+SERVE_PORT ?= 8901
+SERVE_HEALTH_PATH ?= /health
+SERVE_NAME := serve
 
 VAULT_DOCS_ROOT := /vault/15_Dokumentation
 VAULT_PREPARE_OUTPUT := data/datasets/train.jsonl
@@ -57,7 +67,8 @@ SWAP_GATE_MEM_MIN_KB ?= 2000000
 	train eval eval-val validate-val prepare-dataset prepare-dataset-vault \
 	prepare-dataset-exact prepare-dataset-augmented \
 	self-edits tensorboard \
-	real-run-short real-run-continue run-status nightly-run \
+	real-run-short real-run-continue run-status nightly-run promote-latest-ok \
+	serve-up serve-down serve-logs serve-health serve-reload \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
 	retention-clean clean-smoke clean-data
 
@@ -93,7 +104,13 @@ help:
 	@echo "  real-run-short             - Fresh short run (new adapter from base model)"
 	@echo "  real-run-continue          - Continue from latest OK adapter; fallback to fresh short run"
 	@echo "  run-status                 - Show latest real-run id and artifact status"
-	@echo "  nightly-run                - preflight -> prepare-dataset-vault -> optional limit-cpu -> gate -> real-run-continue -> eval-val -> retention-clean"
+	@echo "  promote-latest-ok          - Promote latest real run to LATEST_OK pointer if eval thresholds pass"
+	@echo "  nightly-run                - preflight -> validate-val -> prepare-dataset-augmented -> train -> eval -> promote -> serve restart -> retention-clean"
+	@echo "  serve-up                   - Start serving stack (OpenAI-compatible API) on configured port"
+	@echo "  serve-down                 - Stop serving stack"
+	@echo "  serve-logs                 - Tail serving logs"
+	@echo "  serve-health               - Query serving health endpoint"
+	@echo "  serve-reload               - Reload serving model from LATEST_OK pointer"
 	@echo "  smoke                      - End-to-end smoke workflow (check/build/up/train/infer/report)"
 	@echo "  retention-clean            - Keep only latest N run-like dirs in models/logs/evals (default N=3)"
 	@echo "  clean-smoke                - Remove smoke outputs"
@@ -111,13 +128,17 @@ check-gpu-host:
 
 check-paths:
 	@test -f $(COMPOSE_FILE) || { echo "ERROR: missing $(COMPOSE_FILE)"; exit 1; }
+	@test -f $(SERVE_COMPOSE_FILE) || { echo "ERROR: missing $(SERVE_COMPOSE_FILE)"; exit 1; }
 	@test -f docker/Dockerfile || { echo "ERROR: missing docker/Dockerfile"; exit 1; }
 	@test -f configs/train_lora_3b_k80.yaml || { echo "ERROR: missing configs/train_lora_3b_k80.yaml"; exit 1; }
 	@test -f src/scripts/train_lora.py || { echo "ERROR: missing src/scripts/train_lora.py"; exit 1; }
+	@test -f src/serve/app.py || { echo "ERROR: missing src/serve/app.py"; exit 1; }
 	@echo "OK: required project files present"
 
 ensure-data-dirs:
 	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR)
+	@touch $(LATEST_OK_ADAPTER_ID_FILE)
+	@if [ ! -f $(LATEST_OK_ADAPTER_PATH_FILE) ]; then echo "data/models/<run-id>" > $(LATEST_OK_ADAPTER_PATH_FILE); fi
 	@echo "OK: ensured data directories"
 
 build: check-docker check-paths
@@ -293,6 +314,7 @@ eval-val: up
 	trap 'rm -f $(RUN_LOCK_FILE)' EXIT INT TERM; \
 	EVAL_RUN_ID=val-$$RUN_ID-$$(date -u +%Y%m%dT%H%M%SZ); \
 	echo "EVAL_VAL_RUN_ID=$$EVAL_RUN_ID"; \
+	echo "$$EVAL_RUN_ID" > $(RUN_STATE_DIR)/LATEST_EVAL_RUN_ID; \
 	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/eval_val.py \
 		--config $(VAL_REG_CONFIG) \
 		--dataset $(VAL_REG_DATASET) \
@@ -412,27 +434,21 @@ real-run-short: preflight up check-gpu-container check-single-flight
 	trap - EXIT INT TERM; \
 	echo "OK: real-run-short finished for $$RUN_ID"
 
-# Default mode: continue from latest OK adapter, fallback to fresh short run.
+# Default mode: continue from latest promoted OK adapter, fallback to fresh short run.
 real-run-continue: preflight up check-gpu-container check-single-flight
 	@set -e; \
 	$(MAKE) swap-gate-train; \
 	printf 'pid=%s\nstart_ts=%s\ncommand=%s\n' "$$$$" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "real-run-continue" > $(RUN_LOCK_FILE); \
 	trap 'rm -f $(RUN_LOCK_FILE)' EXIT INT TERM; \
 	PREV_RUN_ID=""; \
-	if [ -f $(LATEST_REALRUN_ID_FILE) ]; then \
-		CANDIDATE=$$(cat $(LATEST_REALRUN_ID_FILE)); \
-		if [ -f data/models/$$CANDIDATE/adapter_config.json ]; then \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then \
+		CANDIDATE=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); \
+		if [ -n "$$CANDIDATE" ] && [ -f data/models/$$CANDIDATE/adapter_config.json ]; then \
 			PREV_RUN_ID="$$CANDIDATE"; \
 		fi; \
 	fi; \
 	if [ -z "$$PREV_RUN_ID" ]; then \
-		PREV_RUN_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | grep -E '^real-[0-9]{8}T[0-9]{6}Z$$' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
-	fi; \
-	if [ -z "$$PREV_RUN_ID" ]; then \
-		PREV_RUN_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
-	fi; \
-	if [ -z "$$PREV_RUN_ID" ]; then \
-		echo "WARN: no previous OK adapter found. Fallback -> real-run-short"; \
+		echo "WARN: no promoted OK adapter found. Fallback -> real-run-short"; \
 		rm -f $(RUN_LOCK_FILE); \
 		trap - EXIT INT TERM; \
 		$(MAKE) real-run-short; \
@@ -476,33 +492,107 @@ run-status:
 		echo "final_metrics.json: not found (training may have failed early)"; \
 	fi
 
+promote-latest-ok:
+	@set -e; \
+	if [ ! -f $(LATEST_REALRUN_ID_FILE) ]; then \
+		echo "WARN: missing $(LATEST_REALRUN_ID_FILE). Promotion skipped."; \
+		exit 0; \
+	fi; \
+	RUN_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
+	if [ -z "$$RUN_ID" ]; then \
+		echo "WARN: empty latest real run id. Promotion skipped."; \
+		exit 0; \
+	fi; \
+	EVAL_RUN_ID=""; \
+	if [ -f $(RUN_STATE_DIR)/LATEST_EVAL_RUN_ID ]; then \
+		CANDIDATE_EVAL_ID=$$(cat $(RUN_STATE_DIR)/LATEST_EVAL_RUN_ID); \
+		if [ -f $(VAL_REG_OUTPUT_ROOT)/$$CANDIDATE_EVAL_ID/val_report.json ]; then \
+			case "$$CANDIDATE_EVAL_ID" in \
+				val-$$RUN_ID-*) EVAL_RUN_ID="$$CANDIDATE_EVAL_ID" ;; \
+			esac; \
+		fi; \
+	fi; \
+	if [ -z "$$EVAL_RUN_ID" ]; then \
+		EVAL_RUN_ID=$$(find $(VAL_REG_OUTPUT_ROOT) -mindepth 1 -maxdepth 1 -type d -name "val-$$RUN_ID-*" -print 2>/dev/null | sed 's#^$(VAL_REG_OUTPUT_ROOT)/##' | sort -r | head -n 1); \
+	fi; \
+	if [ -z "$$EVAL_RUN_ID" ]; then \
+		echo "WARN: no eval run found for $$RUN_ID. Promotion skipped."; \
+		exit 0; \
+	fi; \
+	REPORT_PATH=$(VAL_REG_OUTPUT_ROOT)/$$EVAL_RUN_ID/val_report.json; \
+	if [ ! -f $$REPORT_PATH ]; then \
+		echo "WARN: missing $$REPORT_PATH. Promotion skipped."; \
+		exit 0; \
+	fi; \
+	PROMOTE_RESULT=$$(python3 -c "import json,sys; p='$$REPORT_PATH'; data=json.load(open(p,'r',encoding='utf-8')); s=data.get('summary',{}); pass_exact=float(s.get('pass_rate_exact_openbook',0.0)); cov_runbook=float(s.get('avg_coverage_runbook_openbook',0.0)); ok=(pass_exact >= float('$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK)') and cov_runbook >= float('$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK)')); print('PROMOTE' if ok else 'KEEP'); print(pass_exact); print(cov_runbook)"); \
+	DECISION=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '1p'); \
+	PASS_EXACT=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '2p'); \
+	COVERAGE_RUNBOOK=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '3p'); \
+	PREV_OK_ID=""; \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then PREV_OK_ID=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); fi; \
+	if [ "$$DECISION" = "PROMOTE" ]; then \
+		echo "$$RUN_ID" > $(LATEST_OK_ADAPTER_ID_FILE); \
+		echo "data/models/$$RUN_ID" > $(LATEST_OK_ADAPTER_PATH_FILE); \
+		python3 -c "import json; data={'run_id':'$$RUN_ID','eval_run_id':'$$EVAL_RUN_ID','decision':'promoted','previous_ok_run_id':'$$PREV_OK_ID','new_ok_run_id':'$$RUN_ID','thresholds':{'pass_rate_exact_openbook_min':float('$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK)'),'avg_coverage_runbook_openbook_min':float('$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK)')},'observed':{'pass_rate_exact_openbook':float('$$PASS_EXACT'),'avg_coverage_runbook_openbook':float('$$COVERAGE_RUNBOOK')}}; open('$(LATEST_PROMOTION_SUMMARY_FILE)','w',encoding='utf-8').write(json.dumps(data,ensure_ascii=False,indent=2))"; \
+		echo "PROMOTED: $$RUN_ID (pass_rate_exact_openbook=$$PASS_EXACT avg_coverage_runbook_openbook=$$COVERAGE_RUNBOOK)"; \
+	else \
+		python3 -c "import json; data={'run_id':'$$RUN_ID','eval_run_id':'$$EVAL_RUN_ID','decision':'kept_previous','previous_ok_run_id':'$$PREV_OK_ID','new_ok_run_id':'$$PREV_OK_ID','thresholds':{'pass_rate_exact_openbook_min':float('$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK)'),'avg_coverage_runbook_openbook_min':float('$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK)')},'observed':{'pass_rate_exact_openbook':float('$$PASS_EXACT'),'avg_coverage_runbook_openbook':float('$$COVERAGE_RUNBOOK')}}; open('$(LATEST_PROMOTION_SUMMARY_FILE)','w',encoding='utf-8').write(json.dumps(data,ensure_ascii=False,indent=2))"; \
+		echo "KEPT_PREVIOUS_OK: $$PREV_OK_ID (candidate $$RUN_ID below thresholds)"; \
+	fi
+
+serve-up:
+	@$(SERVE_COMPOSE) up -d --build
+
+serve-down:
+	@$(SERVE_COMPOSE) down
+
+serve-logs:
+	@$(SERVE_COMPOSE) logs -f $(SERVE_NAME)
+
+serve-health:
+	@curl -fsS http://127.0.0.1:$(SERVE_PORT)$(SERVE_HEALTH_PATH)
+
+serve-reload:
+	@curl -fsS -X POST http://127.0.0.1:$(SERVE_PORT)/reload
+
 # Orchestrator:
 # 1) preflight
-# 2) prepare-dataset-vault
-# 3) dataset gate: new_samples_count == 0 -> skip (exit 0)
-# 4) real-run-continue (with internal fallback to fresh)
-# 5) eval-val (non-blocking)
-# 6) retention-clean
-nightly-run: preflight prepare-dataset-vault check-single-flight
+# 2) lock-status
+# 3) validate-val
+# 4) prepare-dataset-augmented
+# 5) continue from LATEST_OK, else fresh short run
+# 6) eval-val
+# 7) promote-latest-ok
+# 8) restart serve only if promoted
+# 9) retention-clean
+nightly-run: preflight validate-val prepare-dataset-augmented check-single-flight
 	@set -e; \
+	$(MAKE) lock-status; \
 	if [ "$(NIGHTLY_APPLY_CPU_LIMIT)" = "1" ]; then \
 		$(MAKE) limit-cpu; \
 	else \
 		echo "INFO: nightly-run CPU cap skipped (set NIGHTLY_APPLY_CPU_LIMIT=1 to enable)"; \
 	fi; \
-	NEW_COUNT=$$(python3 -c "import json; p='$(VAULT_PREPARE_REPORT)'; \
-try: \
- d=json.load(open(p,'r',encoding='utf-8')); \
- print(int(d.get('new_samples_count', d.get('samples_written', 0)))); \
-except Exception: \
- print(0)"); \
-	if [ "$$NEW_COUNT" = "0" ]; then \
-		echo "INFO: nightly-run skip (new_samples_count=0)"; \
-		exit 0; \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ] && [ -n "$$(cat $(LATEST_OK_ADAPTER_ID_FILE))" ] && [ -f data/models/$$(cat $(LATEST_OK_ADAPTER_ID_FILE))/adapter_config.json ]; then \
+		echo "INFO: nightly-run start mode=continue from promoted adapter"; \
+		$(MAKE) real-run-continue; \
+	else \
+		echo "INFO: nightly-run start mode=fresh-short (no promoted adapter available)"; \
+		$(MAKE) real-run-short; \
 	fi; \
-	echo "INFO: nightly-run new_samples_count=$$NEW_COUNT"; \
-	$(MAKE) real-run-continue; \
 	$(MAKE) eval-val; \
+	PREV_OK_ID=""; \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then PREV_OK_ID=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); fi; \
+	$(MAKE) promote-latest-ok; \
+	NEW_OK_ID=""; \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then NEW_OK_ID=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); fi; \
+	if [ -n "$$NEW_OK_ID" ] && [ "$$NEW_OK_ID" != "$$PREV_OK_ID" ]; then \
+		echo "INFO: promoted adapter changed ($$PREV_OK_ID -> $$NEW_OK_ID); restarting serve"; \
+		$(MAKE) serve-down || true; \
+		$(MAKE) serve-up; \
+	else \
+		echo "INFO: no new promotion applied; serving remains unchanged"; \
+	fi; \
 	$(MAKE) retention-clean; \
 	echo "OK: nightly-run completed"
 
@@ -564,20 +654,27 @@ smoke-report:
 
 # Keeps latest N run-like directories in models/logs/evals.
 # Never touches HF caches (outside these paths).
-# Protects LATEST_REALRUN_ID from pruning and repairs stale pointer afterwards.
+# Protects LATEST_REALRUN_ID and LATEST_OK_ADAPTER_ID from pruning and repairs stale pointers afterwards.
 retention-clean:
 	@set -e; \
 	KEEP=$(RETENTION_KEEP); \
-	PROTECT_RUN_ID=""; \
+	PROTECT_REAL_ID=""; \
+	PROTECT_OK_ID=""; \
 	if [ -f $(LATEST_REALRUN_ID_FILE) ]; then \
-		PROTECT_RUN_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
+		PROTECT_REAL_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
 	fi; \
-	echo "INFO: retention keep=$$KEEP protect_run_id=$$PROTECT_RUN_ID"; \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then \
+		PROTECT_OK_ID=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); \
+	fi; \
+	echo "INFO: retention keep=$$KEEP protect_real_id=$$PROTECT_REAL_ID protect_ok_id=$$PROTECT_OK_ID"; \
 	for ROOT in data/models data/logs data/evals; do \
 		[ -d $$ROOT ] || { echo "INFO: skip missing $$ROOT"; continue; }; \
 		CANDIDATES=$$(find $$ROOT -mindepth 1 -maxdepth 1 -type d -print | sed "s#^$$ROOT/##" | grep -E ".*-[0-9]{8}T[0-9]{6}Z$$" | sort -r); \
-		if [ -n "$$PROTECT_RUN_ID" ]; then \
-			CANDIDATES=$$(printf '%s\n' "$$CANDIDATES" | grep -v -x "$$PROTECT_RUN_ID" || true); \
+		if [ -n "$$PROTECT_REAL_ID" ]; then \
+			CANDIDATES=$$(printf '%s\n' "$$CANDIDATES" | grep -v -x "$$PROTECT_REAL_ID" || true); \
+		fi; \
+		if [ -n "$$PROTECT_OK_ID" ]; then \
+			CANDIDATES=$$(printf '%s\n' "$$CANDIDATES" | grep -v -x "$$PROTECT_OK_ID" || true); \
 		fi; \
 		COUNT=$$(printf '%s\n' "$$CANDIDATES" | sed '/^$$/d' | wc -l | tr -d ' '); \
 		if [ "$$COUNT" -le "$$KEEP" ]; then \
@@ -593,7 +690,7 @@ retention-clean:
 	done; \
 	if [ -f $(LATEST_REALRUN_ID_FILE) ]; then \
 		CURRENT_ID=$$(cat $(LATEST_REALRUN_ID_FILE)); \
-		if [ ! -f data/models/$$CURRENT_ID/adapter_config.json ]; then \
+		if [ -n "$$CURRENT_ID" ] && [ ! -f data/models/$$CURRENT_ID/adapter_config.json ]; then \
 			NEW_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | grep -E '^real-[0-9]{8}T[0-9]{6}Z$$' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
 			if [ -z "$$NEW_ID" ]; then \
 				NEW_ID=$$(find data/models -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sed 's#^data/models/##' | sort -r | while IFS= read -r RID; do [ -f data/models/$$RID/adapter_config.json ] && { echo "$$RID"; break; }; done); \
@@ -604,6 +701,14 @@ retention-clean:
 			else \
 				echo "WARN: no adapter found to repair $(LATEST_REALRUN_ID_FILE)"; \
 			fi; \
+		fi; \
+	fi; \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then \
+		CURRENT_OK_ID=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); \
+		if [ -n "$$CURRENT_OK_ID" ] && [ ! -f data/models/$$CURRENT_OK_ID/adapter_config.json ]; then \
+			echo "WARN: promoted adapter missing after retention; clearing LATEST_OK pointer"; \
+			: > $(LATEST_OK_ADAPTER_ID_FILE); \
+			echo "data/models/<run-id>" > $(LATEST_OK_ADAPTER_PATH_FILE); \
 		fi; \
 	fi; \
 	echo "OK: retention-clean done"
