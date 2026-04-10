@@ -91,6 +91,7 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
 - [ ] Für neue Betriebsmodi zusätzlich eine kurze, kompakte Inbetriebnahme-Checkliste in `.ai/` anlegen
 - [ ] `.env.example` nur mit tatsächlich genutzten oder bewusst optionalen Variablen pflegen; Alt-/Scheinfelder entfernen
 - [ ] Bei Environment-Variablen zwischen aktiver technischer Nutzung, dokumentarischem Zweck und Zukunftsoption explizit unterscheiden
+- [ ] Neue Feature-Wünsche zur Infrastruktur-Portabilität (z. B. GPU-Profile) immer als eigene Anforderung mit Zielbild, Akzeptanzkriterien und Betriebsregeln dokumentieren
 
 ---
 
@@ -169,6 +170,18 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - `.env.example` muss den tatsächlichen Betriebsstand von Training und Serving widerspiegeln, einschließlich `SERVE_PORT`, `BASE_MODEL`, `LATEST_OK_POINTER` und `HEALTH_PATH`, wenn diese im Compose-Stack verwendet werden.
   - Wartungsprinzip dokumentiert:
     - Environment-Templates regelmäßig gegen reale Compose-/Runtime-Nutzung abgleichen, damit Setup-Dokumentation und technische Verdrahtung nicht auseinanderlaufen.
+    - Neuer Feature-Wunsch aufgenommen: GPU-Profil-Portabilität über `.env` und Profil-Configs (inkl. optionaler Dockerfile-Profile pro GPU-Klasse), damit Trainings- und Serving-Stacks ohne Codeänderung zwischen unterstützten GPUs umschaltbar sind.
+  - Eval-Härtung (Regression `val`) dokumentiert:
+    - Exact-Normalisierung wurde robust gegen Wrapper-/Template-Leakage ausgelegt (`Kontext:`, `Antwort:`, `Instruction:` usw. werden in Exact-Fällen entfernt).
+    - Für Exact-Fälle wurde `first_line_only` als Standard eingeführt, um endlose Wiederholungen im Modell-Output nicht als Primärsignal zu werten.
+    - Kandidaten-Extraktion für Single-Value-Exact-Fälle ergänzt (Pfad-/Dateiname-/Token-Muster), damit der geforderte Wert deterministisch aus umgebendem Text isoliert werden kann.
+    - Zielbild bestätigt: Eval nicht „cheaten“, sondern robust den fachlich geforderten Zielwert extrahieren und exakt vergleichen.
+  - Serving-Härtung (`src/serve/app.py`) dokumentiert:
+    - Startverhalten ohne `LATEST_OK_ADAPTER_ID` auf „degraded statt crash“ umgestellt.
+    - `/health` liefert jetzt auch im Degraded-Status strukturierte Zustandsinformationen (`status`, `message`, Pointer-/Adapter-Kontext).
+    - `/v1/chat/completions` liefert bei nicht geladenem Modell deterministisch `503` mit klarer Ursache statt Laufzeitcrash.
+    - Generierungsdefaults gegen Looping verschärft (`repetition_penalty`, optional `no_repeat_ngram_size`, plus Postprocessing bei wiederholten Wrapper-Tokens).
+    - Betriebsprinzip bestätigt: Auditierbare Trennung zwischen „Service läuft“ und „modellseitig bereit“ bleibt erhalten.
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.

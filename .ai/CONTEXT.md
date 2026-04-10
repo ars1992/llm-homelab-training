@@ -332,6 +332,105 @@ Verbindliche Reihenfolge:
 - Serving wird nur bei neuer Promotion aktualisiert.
 - Retention muss mindestens `LATEST_REALRUN_ID` und `LATEST_OK_ADAPTER_ID` schützen.
 
+## TODO — SEAL Vorbereitung / Informationsbedarf an Eliot
+
+### Ziel
+Für den nächsten Ausbauschritt in Richtung SEAL-inspirierter Self-Edit-Pipeline wird zusätzliche fachliche und technische Spezifikation benötigt.
+
+### Ausgangslage
+Das Skript `src/scripts/generate_self_edits.py` ist aktuell nur ein **MVP-/Placeholder-Baustein**.
+
+Aktueller Stand:
+- liest ein bestehendes JSONL-Dataset
+- erzeugt deterministische Placeholder-Kandidaten
+- führt **keine** modellbasierte Selbstkorrektur aus
+- ist damit derzeit nur für Pfadstabilisierung, Formatvalidierung und Audit-Vorbereitung geeignet
+
+### Warum dieses Skript für SEAL relevant ist
+Für einen echten SEAL-nahen Workflow wird weiterhin ein Baustein benötigt, der aus bestehenden Beispielen editierbare Kandidaten erzeugt.
+
+`generate_self_edits.py` ist dafür der naheliegende Startpunkt, weil dort bereits vorhanden sind:
+- Einlesen und Validierung von JSONL-Beispielen
+- stabile `run_id`
+- strukturierte Kandidatenobjekte
+- Audit-/Report-Ausgabe
+- deterministische Pipeline-Anbindung
+
+Aktuell fehlt jedoch die eigentliche fachliche Logik für:
+- Edit-Generierung
+- Verifikation
+- Annahme-/Verwerfungsregeln
+- Rückführung in Trainingsdaten
+
+### Informationsbedarf an Eliot
+Eliot soll für den nächsten Planungsschritt zusätzliche Informationen liefern bzw. im Vault konkretisieren:
+
+1. **Zielprozess des SEAL-Loops**
+   - Welche Schritte soll der zukünftige Loop genau enthalten?
+   - Beispiel: Kandidat erzeugen → verifizieren → bewerten → akzeptieren/verwerfen → neues Trainingssample schreiben
+
+2. **Fachliches Datenmodell**
+   - Welche Entitäten werden benötigt?
+   - Mögliche Kandidaten:
+     - `source_example`
+     - `edit_candidate`
+     - `verification_result`
+     - `acceptance_decision`
+     - `self_edit_run`
+
+3. **Pflichtfelder pro Self-Edit-Artefakt**
+   - Welche IDs und Auditfelder müssen verpflichtend enthalten sein?
+   - Beispiel:
+     - `candidate_id`
+     - `source_example_id`
+     - `run_id`
+     - `strategy`
+     - `verifier_result`
+     - `decision`
+     - `timestamp_utc`
+
+4. **Akzeptanzlogik**
+   - Nach welchen Kriterien wird ein vorgeschlagener Edit akzeptiert oder verworfen?
+   - Wer oder was ist im MVP der Verifier:
+     - Regelwerk
+     - zweiter Modellaufruf
+     - deterministic checks
+     - manuelle Freigabe
+
+5. **Integration in die Trainingspipeline**
+   - Sollen akzeptierte Self-Edits direkt in ein neues Trainingsdataset einfließen?
+   - Wenn ja:
+     - in welches Dateiformat
+     - in welches Zielverzeichnis
+     - mit welcher Trennung zwischen Quelle und abgeleitetem Beispiel
+
+6. **Fehler- und Sonderfälle**
+   - Was passiert bei:
+     - leerem Kandidaten
+     - identischem Output
+     - widersprüchlicher Verifikation
+     - unzureichender Confidence
+     - beschädigtem JSONL-Eintrag
+
+7. **Abgrenzung zum aktuellen Placeholder**
+   - Welche Teile von `generate_self_edits.py` bleiben bestehen?
+   - Welche Teile müssen ersetzt oder erweitert werden?
+   - Soll der Placeholder-Modus parallel erhalten bleiben?
+
+### Arbeitsannahme
+Bis zur Klärung durch Eliot gilt:
+- `src/scripts/generate_self_edits.py` bleibt ein technischer Placeholder
+- das Skript ist **noch keine fachlich valide SEAL-Implementierung**
+- vor Umbau müssen Zielprozess, Datenmodell und Akzeptanzlogik dokumentiert sein
+
+### Nächste empfohlene Aktion
+Eliot soll im Vault eine präzise SEAL-Vorbereitungsnotiz anlegen mit:
+- Zielprozess
+- Entitäten
+- Auditfeldern
+- Entscheidungslogik
+- Integrationspunkten in `llm-homelab-training`
+
 ## Runtime-Reset für neuen End-to-End-Test
 
 ### Zweck
@@ -389,6 +488,63 @@ Ein dediziertes Reset-Skript bzw. Make-Target für diesen vollständigen Runtime
 
 ## Vault-Dataset-Generierung (15 Dokumentation)
 ## Umgebungsdatei `.env` (verbindliche Einordnung)
+
+### Feature-Vorschlag: GPU-Profil-Portabilität über `.env` und Profil-Configs
+
+#### Ziel
+GPU-spezifische Einstellungen sollen zentral über `.env` steuerbar sein, damit der Betrieb auf unterschiedlichen Hosts reproduzierbar bleibt und nicht pro Host manuell im Code angepasst werden muss.
+
+#### Begründung
+Der aktuelle Stand ist stark auf K80 optimiert. Für Portabilität auf andere GPUs (z. B. T4, RTX, neuere Data-Center-Klassen) soll ein Profilansatz eingeführt werden, der:
+1. Hardware-spezifische Defaults kapselt,
+2. Compose-/Build-Parameter standardisiert,
+3. Trainings- und Serving-Konfiguration deterministisch auswählt.
+
+#### Geplantes Funktionsprinzip
+1. `.env` setzt ein aktives Profil, z. B. `GPU_PROFILE=k80`.
+2. Das Profil bestimmt:
+   - Trainings-Config (`configs/train_lora_3b_<profil>.yaml`)
+   - optionale Eval-/Serving-Defaults
+   - optionales Build-/Dockerfile-Profil
+3. Make-Targets und Compose-Aufrufe lesen das Profil und wählen die passenden Artefakte.
+4. Laufmetadaten dokumentieren das aktive Profil verpflichtend.
+
+#### Geplante Profilstruktur (Vorschlag)
+- `configs/profiles/gpu/k80.env`
+- `configs/profiles/gpu/t4.env`
+- `configs/profiles/gpu/rtx3090.env`
+- `configs/train_lora_3b_k80.yaml`
+- `configs/train_lora_3b_t4.yaml`
+- `configs/train_lora_3b_rtx3090.yaml`
+- optional:
+  - `docker/Dockerfile.k80`
+  - `docker/Dockerfile.t4`
+  - `docker/Dockerfile.rtx3090`
+
+#### Geplante `.env`-Schlüssel (Vorschlag)
+- `GPU_PROFILE`
+- `TRAIN_CONFIG_PROFILE`
+- `EVAL_CONFIG_PROFILE`
+- `TRAIN_DOCKERFILE`
+- `SERVE_DOCKERFILE`
+- `CUDA_VISIBLE_DEVICES`
+- `NVIDIA_VISIBLE_DEVICES`
+
+#### Betriebsregeln
+- Ohne explizite Profilwahl gilt ein konservativer Default (`k80`), bis ein anderes Profil validiert ist.
+- Jede neue GPU erhält:
+  1. Profil-Datei,
+  2. Trainingskonfiguration,
+  3. dokumentierte Grenzwerte,
+  4. Smoke-Nachweis.
+- Profilwechsel ohne Preflight + Smoke gilt als No-Go.
+
+#### Akzeptanzkriterien (Feature)
+- Auswahl des GPU-Profils ausschließlich über `.env` möglich.
+- Keine manuellen Codeänderungen für den Wechsel zwischen unterstützten GPUs nötig.
+- Training und Serving verwenden nachvollziehbar dasselbe aktive Profil.
+- Run-Metadaten enthalten `gpu_profile`, `config_ref`, `dockerfile_ref`.
+- Für jedes unterstützte Profil liegt eine kurze Betriebsdokumentation unter `.ai/` vor.
 
 ### Zweck
 Die Datei `.env` ist in diesem Projekt keine fachliche Primärkonfiguration für Training oder Evaluation, sondern eine lokale Override-Schicht für Docker Compose und host-spezifische Betriebsparameter.

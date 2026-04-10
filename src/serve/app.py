@@ -26,18 +26,22 @@ LATEST_OK_POINTER = _env(
 SERVE_HOST = _env("SERVE_HOST", "0.0.0.0")
 SERVE_PORT = int(_env("SERVE_PORT", "8901"))
 HEALTH_PATH = _env("HEALTH_PATH", "/health")
+REPETITION_PENALTY = float(_env("REPETITION_PENALTY", "1.15"))
+NO_REPEAT_NGRAM_SIZE = int(_env("NO_REPEAT_NGRAM_SIZE", "6"))
 
 
 @dataclass
 class LoadedModelState:
+    status: str  # "ok" | "degraded"
+    message: str
     base_model: str
     pointer_path: Path
     adapter_run_id: Optional[str]
     adapter_path: Optional[Path]
     runtime_device: str
     loaded_at_unix: float
-    model: Any
-    tokenizer: Any
+    model: Optional[Any]
+    tokenizer: Optional[Any]
 
 
 class ChatMessage(BaseModel):
@@ -80,6 +84,7 @@ class ChatCompletionResponse(BaseModel):
 
 class ReloadResponse(BaseModel):
     status: str
+    message: Optional[str] = None
     adapter_run_id: Optional[str]
     adapter_path: Optional[str]
     runtime_device: str
@@ -131,59 +136,103 @@ def build_prompt(messages: List[ChatMessage]) -> str:
 
 def resolve_adapter_run_id(pointer_path: Path) -> str:
     if not pointer_path.exists():
-        raise FileNotFoundError(f"Pointer file not found: {pointer_path}")
-
+        return ""
     run_id = pointer_path.read_text(encoding="utf-8").strip()
     if not run_id:
-        raise ValueError(f"Pointer file is empty: {pointer_path}")
+        return ""
     return run_id
 
 
-def resolve_adapter_path(pointer_path: Path) -> Tuple[str, Path]:
+def resolve_adapter_path(
+    pointer_path: Path,
+) -> Tuple[Optional[str], Optional[Path], Optional[str]]:
     run_id = resolve_adapter_run_id(pointer_path)
+    if not run_id:
+        return (
+            None,
+            None,
+            f"No LATEST_OK_ADAPTER_ID set. Pointer missing or empty: {pointer_path}",
+        )
+
     adapter_path = Path("/workspace/data/models") / run_id
     if not adapter_path.exists():
-        raise FileNotFoundError(f"Adapter directory not found: {adapter_path}")
-    if not (adapter_path / "adapter_config.json").exists():
-        raise FileNotFoundError(
-            f"adapter_config.json missing for promoted adapter: {adapter_path}"
+        return (
+            run_id,
+            None,
+            f"Promoted adapter directory not found: {adapter_path}",
         )
-    return run_id, adapter_path
+    if not (adapter_path / "adapter_config.json").exists():
+        return (
+            run_id,
+            None,
+            f"adapter_config.json missing for promoted adapter: {adapter_path}",
+        )
+    return run_id, adapter_path, None
 
 
 def load_model_state() -> LoadedModelState:
     pointer_path = Path(LATEST_OK_POINTER)
-    adapter_run_id, adapter_path = resolve_adapter_path(pointer_path)
+    adapter_run_id, adapter_path, resolve_message = resolve_adapter_path(pointer_path)
 
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, use_fast=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    if not adapter_run_id or adapter_path is None:
+        return LoadedModelState(
+            status="degraded",
+            message=resolve_message or "Serving started without a loaded adapter.",
+            base_model=BASE_MODEL,
+            pointer_path=pointer_path,
+            adapter_run_id=adapter_run_id,
+            adapter_path=adapter_path,
+            runtime_device="cpu",
+            loaded_at_unix=time.time(),
+            model=None,
+            tokenizer=None,
+        )
 
-    torch_dtype = resolve_torch_dtype()
-    device_map = "auto" if torch.cuda.is_available() else None
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, use_fast=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        torch_dtype=torch_dtype,
-        device_map=device_map,
-    )
-    model = PeftModel.from_pretrained(model, str(adapter_path))
-    model.eval()
+        torch_dtype = resolve_torch_dtype()
+        device_map = "auto" if torch.cuda.is_available() else None
 
-    runtime_device = "cpu"
-    if hasattr(model, "device"):
-        runtime_device = str(model.device)
+        model = AutoModelForCausalLM.from_pretrained(
+            BASE_MODEL,
+            torch_dtype=torch_dtype,
+            device_map=device_map,
+        )
+        model = PeftModel.from_pretrained(model, str(adapter_path))
+        model.eval()
 
-    return LoadedModelState(
-        base_model=BASE_MODEL,
-        pointer_path=pointer_path,
-        adapter_run_id=adapter_run_id,
-        adapter_path=adapter_path,
-        runtime_device=runtime_device,
-        loaded_at_unix=time.time(),
-        model=model,
-        tokenizer=tokenizer,
-    )
+        runtime_device = "cpu"
+        if hasattr(model, "device"):
+            runtime_device = str(model.device)
+
+        return LoadedModelState(
+            status="ok",
+            message="ready",
+            base_model=BASE_MODEL,
+            pointer_path=pointer_path,
+            adapter_run_id=adapter_run_id,
+            adapter_path=adapter_path,
+            runtime_device=runtime_device,
+            loaded_at_unix=time.time(),
+            model=model,
+            tokenizer=tokenizer,
+        )
+    except Exception as exc:
+        return LoadedModelState(
+            status="degraded",
+            message=f"Model load failed: {exc}",
+            base_model=BASE_MODEL,
+            pointer_path=pointer_path,
+            adapter_run_id=adapter_run_id,
+            adapter_path=adapter_path,
+            runtime_device="cpu",
+            loaded_at_unix=time.time(),
+            model=None,
+            tokenizer=None,
+        )
 
 
 def get_state() -> LoadedModelState:
@@ -191,6 +240,27 @@ def get_state() -> LoadedModelState:
     if _state is None:
         _state = load_model_state()
     return _state
+
+
+def postprocess_generated_text(text: str) -> str:
+    out = (text or "").strip()
+    if not out:
+        return out
+
+    tokens = ["### Instruction:", "Kontext:", "Antwort:"]
+    out_lower = out.lower()
+
+    for token in tokens:
+        token_lower = token.lower()
+        first = out_lower.find(token_lower)
+        if first == -1:
+            continue
+        second = out_lower.find(token_lower, first + len(token_lower))
+        if second != -1:
+            out = out[:second].rstrip()
+            out_lower = out.lower()
+
+    return out
 
 
 @torch.no_grad()
@@ -202,6 +272,8 @@ def generate_text(
 ) -> Tuple[str, UsageBlock]:
     tokenizer = state.tokenizer
     model = state.model
+    if tokenizer is None or model is None:
+        raise RuntimeError(state.message or "Model is not loaded")
 
     inputs = tokenizer(prompt, return_tensors="pt")
     if hasattr(model, "device"):
@@ -213,7 +285,10 @@ def generate_text(
         "do_sample": do_sample,
         "eos_token_id": tokenizer.eos_token_id,
         "pad_token_id": tokenizer.pad_token_id,
+        "repetition_penalty": max(float(REPETITION_PENALTY), 1.0),
     }
+    if NO_REPEAT_NGRAM_SIZE > 0:
+        gen_kwargs["no_repeat_ngram_size"] = int(NO_REPEAT_NGRAM_SIZE)
     if do_sample:
         gen_kwargs["temperature"] = max(float(temperature), 1e-6)
         gen_kwargs["top_p"] = 1.0
@@ -227,6 +302,7 @@ def generate_text(
     prompt_len = int(inputs["input_ids"].shape[1])
     completion_ids = outputs[0][prompt_len:]
     completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
+    completion_text = postprocess_generated_text(completion_text)
 
     prompt_tokens = int(inputs["input_ids"].shape[1])
     completion_tokens = int(completion_ids.shape[0])
@@ -246,51 +322,43 @@ def startup_event() -> None:
 
 @app.get(HEALTH_PATH)
 def health() -> Dict[str, Any]:
-    try:
-        state = get_state()
-        return {
-            "status": "ok",
-            "service": "serve",
-            "base_model": state.base_model,
-            "adapter_run_id": state.adapter_run_id,
-            "adapter_path": str(state.adapter_path) if state.adapter_path else None,
-            "pointer_path": str(state.pointer_path),
-            "runtime_device": state.runtime_device,
-            "loaded_at_unix": state.loaded_at_unix,
-            "serve_host": SERVE_HOST,
-            "serve_port": SERVE_PORT,
-        }
-    except Exception as exc:
-        return {
-            "status": "error",
-            "service": "serve",
-            "error": str(exc),
-            "pointer_path": LATEST_OK_POINTER,
-            "base_model": BASE_MODEL,
-        }
+    state = get_state()
+    return {
+        "status": state.status,
+        "service": "serve",
+        "message": state.message,
+        "base_model": state.base_model,
+        "adapter_run_id": state.adapter_run_id,
+        "adapter_path": str(state.adapter_path) if state.adapter_path else None,
+        "pointer_path": str(state.pointer_path),
+        "runtime_device": state.runtime_device,
+        "loaded_at_unix": state.loaded_at_unix,
+        "serve_host": SERVE_HOST,
+        "serve_port": SERVE_PORT,
+    }
 
 
 @app.post("/reload", response_model=ReloadResponse)
 def reload_model() -> ReloadResponse:
     global _state
-    try:
-        _state = load_model_state()
-        return ReloadResponse(
-            status="ok",
-            adapter_run_id=_state.adapter_run_id,
-            adapter_path=str(_state.adapter_path) if _state.adapter_path else None,
-            runtime_device=_state.runtime_device,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Reload failed: {exc}") from exc
+    _state = load_model_state()
+    return ReloadResponse(
+        status=_state.status,
+        message=_state.message,
+        adapter_run_id=_state.adapter_run_id,
+        adapter_path=str(_state.adapter_path) if _state.adapter_path else None,
+        runtime_device=_state.runtime_device,
+    )
 
 
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse:
-    try:
-        state = get_state()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Model not ready: {exc}") from exc
+    state = get_state()
+    if state.status != "ok" or state.model is None or state.tokenizer is None:
+        raise HTTPException(
+            status_code=503,
+            detail=state.message or "Model not ready",
+        )
 
     try:
         prompt = build_prompt(req.messages)

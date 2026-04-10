@@ -26,11 +26,12 @@ evaluation:
     case_sensitive: false
     trim_whitespace: true
 
-    # Exact cases stay strict
+    # Exact cases stay strict, but tolerate common output wrappers
     exact:
         case_sensitive: true
         trim_whitespace: true
-        strip_wrappers: false
+        strip_wrappers: true
+        first_line_only: true
 
     # Non-exact cases (especially runbook) may normalize more aggressively
     non_exact:

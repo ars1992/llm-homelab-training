@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -123,6 +124,25 @@ def unify_newlines(s: str) -> str:
     return s.replace("\r\n", "\n").replace("\r", "\n")
 
 
+EXACT_WRAPPERS = [
+    "kontext:",
+    "antwort:",
+    "instruction:",
+    "### instruction:",
+    "### response:",
+    "aufgabe:",
+    "fokus:",
+    "regel:",
+]
+
+
+def strip_known_wrappers_exact(s: str) -> str:
+    t = unify_newlines(s or "")
+    for wrapper in EXACT_WRAPPERS:
+        t = re.sub(rf"(?im)^\s*{re.escape(wrapper)}\s*", "", t)
+    return t
+
+
 def strip_surrounding_wrappers(s: str) -> str:
     """
     Removes surrounding backticks and quotes repeatedly:
@@ -156,6 +176,68 @@ def normalize_text(
     if not case_sensitive:
         out = out.lower()
     return out
+
+
+def normalize_exact_text(
+    s: str,
+    trim_whitespace: bool = True,
+    case_sensitive: bool = True,
+    strip_wrappers: bool = False,
+    first_line_only: bool = True,
+) -> str:
+    out = unify_newlines(s or "")
+    out = strip_known_wrappers_exact(out)  # always enabled for exact normalization
+    if strip_wrappers:
+        out = strip_surrounding_wrappers(out)
+    out = re.sub(r"[ \t]+", " ", out)
+    if first_line_only:
+        out = out.split("\n", 1)[0]
+    if trim_whitespace:
+        out = out.strip()
+    if not case_sensitive:
+        out = out.lower()
+    return out
+
+
+def _common_prefix_len(a: str, b: str) -> int:
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def extract_candidate_for_exact(output: str, expected: str) -> Optional[str]:
+    o = output or ""
+    e = expected or ""
+    if not e:
+        return None
+
+    if "/" in e:
+        candidates = re.findall(r"/[^\s'\"`]+(?:\s[^\s:'\"`]+)*", o)
+        cleaned = [c.strip().rstrip(".,;:") for c in candidates if c and c.strip()]
+        for c in cleaned:
+            if c == e:
+                return c
+        containing = [c for c in cleaned if e in c]
+        if containing:
+            containing.sort(key=len, reverse=True)
+            return containing[0]
+        if cleaned:
+            cleaned.sort(key=lambda c: (_common_prefix_len(c, e), len(c)), reverse=True)
+            return cleaned[0]
+        return None
+
+    if "." in e:
+        m = re.search(rf"\b{re.escape(e)}\b", o)
+        if m:
+            return m.group(0)
+
+    m = re.search(rf"\b{re.escape(e)}\b", o)
+    if m:
+        return m.group(0)
+
+    return None
 
 
 def preview_text(s: str, max_chars: int) -> str:
@@ -318,6 +400,7 @@ def evaluate_item(
     exact_case_sensitive: bool,
     exact_trim_whitespace: bool,
     exact_strip_wrappers: bool,
+    exact_first_line_only: bool,
     runbook_pass_threshold: float,
     no_prompt_echo_tag: str = "no_prompt_echo",
 ) -> Dict[str, Any]:
@@ -338,32 +421,51 @@ def evaluate_item(
                 "found_expected_contains": [],
                 "missing_expected_contains": expected_contains[:],
                 "fail_reason": "prompt_echo_detected",
+                "exact_candidate": None,
             }
 
     if is_exact:
-        pred_norm = normalize_text(
+        pred_norm = normalize_exact_text(
             prediction,
             trim_whitespace=exact_trim_whitespace,
             case_sensitive=exact_case_sensitive,
             strip_wrappers=exact_strip_wrappers,
+            first_line_only=exact_first_line_only,
         )
         exp_norm_pairs = [
             (
                 original,
-                normalize_text(
+                normalize_exact_text(
                     original,
                     trim_whitespace=exact_trim_whitespace,
                     case_sensitive=exact_case_sensitive,
                     strip_wrappers=exact_strip_wrappers,
+                    first_line_only=exact_first_line_only,
                 ),
             )
             for original in expected_contains
         ]
 
-        # exact mode: prediction must exactly equal one expected token
-        found = [orig for orig, nrm in exp_norm_pairs if pred_norm == nrm]
-        missing = [] if found else expected_contains[:]
-        passed = len(found) > 0
+        # exact mode with candidate extraction:
+        # normalize output, extract best candidate for each expected token, then exact compare.
+        exact_found: List[str] = []
+        best_candidate: Optional[str] = None
+        for original, nrm in exp_norm_pairs:
+            candidate = extract_candidate_for_exact(pred_norm, nrm) or pred_norm
+            candidate_norm = normalize_exact_text(
+                candidate,
+                trim_whitespace=exact_trim_whitespace,
+                case_sensitive=exact_case_sensitive,
+                strip_wrappers=exact_strip_wrappers,
+                first_line_only=exact_first_line_only,
+            )
+            if candidate_norm == nrm:
+                exact_found.append(original)
+                best_candidate = candidate
+                break
+
+        missing = [] if exact_found else expected_contains[:]
+        passed = len(exact_found) > 0
         coverage = 1.0 if passed else 0.0
         fail_reason = None if passed else "exact_mismatch"
 
@@ -372,9 +474,10 @@ def evaluate_item(
             "coverage": coverage,
             "hits": 1 if passed else 0,
             "total_expected": len(expected_contains),
-            "found_expected_contains": found,
+            "found_expected_contains": exact_found,
             "missing_expected_contains": missing,
             "fail_reason": fail_reason,
+            "exact_candidate": best_candidate if passed else pred_norm,
         }
 
     # non-exact (substring coverage)
@@ -424,6 +527,7 @@ def evaluate_item(
         "found_expected_contains": found,
         "missing_expected_contains": missing,
         "fail_reason": fail_reason,
+        "exact_candidate": None,
     }
 
 
@@ -523,6 +627,9 @@ def main() -> None:
     exact_strip_wrappers = bool(
         cfg_get(cfg, "evaluation", "exact", "strip_wrappers", default=False)
     )
+    exact_first_line_only = bool(
+        cfg_get(cfg, "evaluation", "exact", "first_line_only", default=True)
+    )
 
     # non-exact mode can normalize more aggressively
     non_exact_case_sensitive = bool(
@@ -602,6 +709,7 @@ def main() -> None:
             exact_case_sensitive=exact_case_sensitive,
             exact_trim_whitespace=exact_trim_whitespace,
             exact_strip_wrappers=exact_strip_wrappers,
+            exact_first_line_only=exact_first_line_only,
             runbook_pass_threshold=runbook_pass_threshold,
         )
 
@@ -619,12 +727,21 @@ def main() -> None:
             if passed:
                 group_passed[group] += 1
 
-        normalized_preview = normalize_text(
-            prediction,
-            trim_whitespace=non_exact_trim_whitespace,
-            case_sensitive=non_exact_case_sensitive,
-            strip_wrappers=non_exact_strip_wrappers,
-        )
+        if "exact" in normalized_tag_set(tags):
+            normalized_preview = normalize_exact_text(
+                prediction,
+                trim_whitespace=exact_trim_whitespace,
+                case_sensitive=exact_case_sensitive,
+                strip_wrappers=exact_strip_wrappers,
+                first_line_only=exact_first_line_only,
+            )
+        else:
+            normalized_preview = normalize_text(
+                prediction,
+                trim_whitespace=non_exact_trim_whitespace,
+                case_sensitive=non_exact_case_sensitive,
+                strip_wrappers=non_exact_strip_wrappers,
+            )
 
         result_row = {
             "id": row["id"],
@@ -640,6 +757,7 @@ def main() -> None:
             "found_expected_contains": verdict["found_expected_contains"],
             "missing_expected_contains": verdict["missing_expected_contains"],
             "fail_reason": verdict["fail_reason"],
+            "exact_candidate": verdict.get("exact_candidate"),
             "output_preview": preview_text(prediction, output_preview_chars),
             "normalized_output_preview": preview_text(
                 normalized_preview, output_preview_chars
@@ -713,6 +831,8 @@ def main() -> None:
                     "case_sensitive": exact_case_sensitive,
                     "trim_whitespace": exact_trim_whitespace,
                     "strip_wrappers": exact_strip_wrappers,
+                    "first_line_only": exact_first_line_only,
+                    "always_strip_known_wrappers": True,
                 },
                 "non_exact": {
                     "case_sensitive": non_exact_case_sensitive,

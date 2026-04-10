@@ -143,9 +143,15 @@ ensure-data-dirs:
 	@echo "OK: ensured data directories"
 
 build: check-docker check-paths
+	@echo "##############"
+	@echo "### STEP build: trainer image build"
+	@echo "##############"
 	@$(COMPOSE) build
 
 up: ensure-data-dirs
+	@echo "##############"
+	@echo "### STEP up: trainer stack start"
+	@echo "##############"
 	@$(COMPOSE) up -d
 
 limit-cpu: up
@@ -285,6 +291,9 @@ eval: up
 
 # Non-blocking by policy: writes report if possible, but never fails E2E.
 eval-val: up
+	@echo "##############"
+	@echo "### STEP eval-val: regression evaluation"
+	@echo "##############"
 	@set +e; \
 	if [ -f $(RUN_LOCK_FILE) ]; then \
 		echo "ERROR: already_running lock_file=$(RUN_LOCK_FILE)"; \
@@ -384,6 +393,9 @@ prepare-dataset-exact: up
 #   3. Merge vault + exact_extraction + runbook samples -> train.jsonl (deduplicated)
 # Use this instead of prepare-dataset-vault when supplemental samples should be included.
 prepare-dataset-augmented: up
+	@echo "##############"
+	@echo "### STEP prepare-dataset-augmented: build merged train dataset"
+	@echo "##############"
 	@set -e; \
 	echo "INFO: Step 1/3 — Vault markdown extraction -> train_vault.jsonl"; \
 	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
@@ -419,6 +431,9 @@ tensorboard: up
 
 # Fresh short run (from base model).
 real-run-short: preflight up check-gpu-container check-single-flight
+	@echo "##############"
+	@echo "### STEP real-run-short: fresh training run"
+	@echo "##############"
 	@set -e; \
 	$(MAKE) swap-gate-train; \
 	printf 'pid=%s\nstart_ts=%s\ncommand=%s\n' "$$$$" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "real-run-short" > $(RUN_LOCK_FILE); \
@@ -437,6 +452,9 @@ real-run-short: preflight up check-gpu-container check-single-flight
 
 # Default mode: continue from latest promoted OK adapter, fallback to fresh short run.
 real-run-continue: preflight up check-gpu-container check-single-flight
+	@echo "##############"
+	@echo "### STEP real-run-continue: continue training from promoted adapter"
+	@echo "##############"
 	@set -e; \
 	$(MAKE) swap-gate-train; \
 	printf 'pid=%s\nstart_ts=%s\ncommand=%s\n' "$$$$" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "real-run-continue" > $(RUN_LOCK_FILE); \
@@ -494,6 +512,9 @@ run-status:
 	fi
 
 promote-latest-ok:
+	@echo "##############"
+	@echo "### STEP promote-latest-ok: evaluate promotion decision"
+	@echo "##############"
 	@set -e; \
 	if [ ! -f $(LATEST_REALRUN_ID_FILE) ]; then \
 		echo "WARN: missing $(LATEST_REALRUN_ID_FILE). Promotion skipped."; \
@@ -542,6 +563,9 @@ promote-latest-ok:
 	fi
 
 serve-up:
+	@echo "##############"
+	@echo "### STEP serve-up: serving stack build/start"
+	@echo "##############"
 	@$(SERVE_COMPOSE) up -d --build
 
 serve-down:
@@ -551,6 +575,9 @@ serve-logs:
 	@$(SERVE_COMPOSE) logs -f $(SERVE_NAME)
 
 serve-health:
+	@echo "##############"
+	@echo "### STEP serve-health: query serving health endpoint"
+	@echo "##############"
 	@curl -fsS http://127.0.0.1:$(SERVE_PORT)$(SERVE_HEALTH_PATH)
 
 serve-reload:
@@ -567,6 +594,9 @@ serve-reload:
 # 8) restart serve only if promoted
 # 9) retention-clean
 nightly-run: preflight validate-val prepare-dataset-augmented check-single-flight
+	@echo "##############"
+	@echo "### STEP nightly-run: full automated pipeline"
+	@echo "##############"
 	@set -e; \
 	$(MAKE) lock-status; \
 	$(MAKE) swap-gate-eval; \
@@ -600,6 +630,9 @@ nightly-run: preflight validate-val prepare-dataset-augmented check-single-fligh
 	echo "OK: nightly-run completed"
 
 smoke: preflight build up check-gpu-container smoke-dataset smoke-train smoke-infer smoke-report
+	@echo "##############"
+	@echo "### STEP smoke: end-to-end smoke workflow completed"
+	@echo "##############"
 	@echo "OK: smoke workflow completed"
 
 smoke-dataset: ensure-data-dirs
@@ -730,6 +763,9 @@ clean-data:
 	@echo "OK: cleaned generated data artifacts and reset runtime pointers (kept data/README.md)"
 
 reset-runtime:
+	@echo "##############"
+	@echo "### STEP reset-runtime: stop stacks and reset runtime state"
+	@echo "##############"
 	@set -e; \
 	echo "INFO: stopping serving stack (if running)"; \
 	$(SERVE_COMPOSE) down || true; \
