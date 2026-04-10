@@ -36,6 +36,7 @@ Die K80 ist eine ältere GPU-Generation (Kepler) mit klaren Grenzen für moderne
 4. `gradient_checkpointing = true`
 5. LoRA-Rank reduzieren (`r: 8` statt `16`)
 6. Nur notwendige `target_modules` aktiv lassen
+7. CUDA-Allocator-Fragmentierung begrenzen: `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128` (in `.env` setzen und Container neu starten)
 
 ---
 

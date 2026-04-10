@@ -16,6 +16,7 @@ services:
             HF_HOME: ${HF_HOME:-/workspace/.cache/huggingface}
             HF_DATASETS_CACHE: ${HF_DATASETS_CACHE:-/workspace/.cache/huggingface/datasets}
             TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/workspace/.cache/huggingface/transformers}
+            PYTORCH_CUDA_ALLOC_CONF: ${PYTORCH_CUDA_ALLOC_CONF:-}
         volumes:
             - ../src:/workspace/src
             - ../configs:/workspace/configs

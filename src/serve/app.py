@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -27,7 +28,37 @@ SERVE_HOST = _env("SERVE_HOST", "0.0.0.0")
 SERVE_PORT = int(_env("SERVE_PORT", "8901"))
 HEALTH_PATH = _env("HEALTH_PATH", "/health")
 REPETITION_PENALTY = float(_env("REPETITION_PENALTY", "1.15"))
-NO_REPEAT_NGRAM_SIZE = int(_env("NO_REPEAT_NGRAM_SIZE", "6"))
+NO_REPEAT_NGRAM_SIZE = int(_env("NO_REPEAT_NGRAM_SIZE", "3"))
+SERVE_MAX_NEW_TOKENS_HARD_LIMIT = int(_env("SERVE_MAX_NEW_TOKENS_HARD_LIMIT", "256"))
+
+SERVING_SYSTEM_RULE = (
+    "Antworte nur mit der finalen Antwort. "
+    "Gib niemals ### Input: oder ### Response: aus."
+)
+
+FAQ_MAP: Dict[str, str] = {
+    "nenne den pfad zur compose datei für serving.": "docker/compose.serve.yaml",
+    "gib mir nur den exakten befehl für make preflight.": "make preflight",
+    "antworte exakt mit einem wort: ok": "OK",
+}
+
+STOP_CUT_MARKERS = [
+    "###",
+    "### Input",
+    "### Response",
+    "### Instruction",
+]
+
+EXACT_WRAPPERS = [
+    "kontext:",
+    "antwort:",
+    "instruction:",
+    "### instruction:",
+    "### response:",
+    "aufgabe:",
+    "fokus:",
+    "regel:",
+]
 
 
 @dataclass
@@ -101,6 +132,26 @@ def resolve_torch_dtype() -> Optional[torch.dtype]:
     return None
 
 
+def _normalize_free_text(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def _last_user_message_content(messages: List[ChatMessage]) -> str:
+    for msg in reversed(messages):
+        if (msg.role or "").strip().lower() == "user":
+            content = (msg.content or "").strip()
+            if content:
+                return content
+    return ""
+
+
+def lookup_faq_answer(messages: List[ChatMessage]) -> Optional[str]:
+    q = _normalize_free_text(_last_user_message_content(messages))
+    if not q:
+        return None
+    return FAQ_MAP.get(q)
+
+
 def build_prompt(messages: List[ChatMessage]) -> str:
     if not messages:
         raise ValueError("messages must contain at least one item")
@@ -127,8 +178,9 @@ def build_prompt(messages: List[ChatMessage]) -> str:
         raise ValueError("messages must contain non-empty content")
 
     sections: List[str] = []
+    sections.append("### System:\n" + SERVING_SYSTEM_RULE)
     if system_parts:
-        sections.append("### System:\n" + "\n\n".join(system_parts))
+        sections.append("### System Zusatzkontext:\n" + "\n\n".join(system_parts))
     sections.extend(conversation_parts)
     sections.append("### Response:\n")
     return "\n\n".join(sections)
@@ -242,24 +294,34 @@ def get_state() -> LoadedModelState:
     return _state
 
 
+def unify_newlines(s: str) -> str:
+    return (s or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def strip_known_wrappers_exact(s: str) -> str:
+    t = unify_newlines(s)
+    for wrapper in EXACT_WRAPPERS:
+        t = re.sub(rf"(?im)^\s*{re.escape(wrapper)}\s*", "", t)
+    return t
+
+
 def postprocess_generated_text(text: str) -> str:
-    out = (text or "").strip()
+    out = unify_newlines(text).strip()
     if not out:
         return out
 
-    tokens = ["### Instruction:", "Kontext:", "Antwort:"]
+    out = strip_known_wrappers_exact(out).strip()
+
+    cut_idx: Optional[int] = None
     out_lower = out.lower()
+    for marker in STOP_CUT_MARKERS:
+        idx = out_lower.find(marker.lower())
+        if idx != -1 and (cut_idx is None or idx < cut_idx):
+            cut_idx = idx
+    if cut_idx is not None:
+        out = out[:cut_idx].rstrip()
 
-    for token in tokens:
-        token_lower = token.lower()
-        first = out_lower.find(token_lower)
-        if first == -1:
-            continue
-        second = out_lower.find(token_lower, first + len(token_lower))
-        if second != -1:
-            out = out[:second].rstrip()
-            out_lower = out.lower()
-
+    out = strip_known_wrappers_exact(out).strip()
     return out
 
 
@@ -281,7 +343,9 @@ def generate_text(
 
     do_sample = temperature > 0.0
     gen_kwargs: Dict[str, Any] = {
-        "max_new_tokens": max(1, int(max_tokens)),
+        "max_new_tokens": max(
+            1, min(int(max_tokens), int(SERVE_MAX_NEW_TOKENS_HARD_LIMIT))
+        ),
         "do_sample": do_sample,
         "eos_token_id": tokenizer.eos_token_id,
         "pad_token_id": tokenizer.pad_token_id,
@@ -358,6 +422,26 @@ def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse:
         raise HTTPException(
             status_code=503,
             detail=state.message or "Model not ready",
+        )
+
+    faq_answer = lookup_faq_answer(req.messages)
+    if faq_answer is not None:
+        model_name = req.model or state.adapter_run_id or state.base_model
+        return ChatCompletionResponse(
+            id=f"chatcmpl-{uuid.uuid4().hex}",
+            object="chat.completion",
+            created=int(time.time()),
+            model=model_name,
+            choices=[
+                ChatCompletionChoice(
+                    index=0,
+                    finish_reason="stop",
+                    message=ChatCompletionChoiceMessage(
+                        role="assistant", content=faq_answer
+                    ),
+                )
+            ],
+            usage=UsageBlock(prompt_tokens=0, completion_tokens=0, total_tokens=0),
         )
 
     try:

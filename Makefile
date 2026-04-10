@@ -41,6 +41,7 @@ SERVE_COMPOSE := docker compose -f $(SERVE_COMPOSE_FILE)
 SERVE_PORT ?= 8901
 SERVE_HEALTH_PATH ?= /health
 SERVE_NAME := serve
+SERVE_SMOKE_OUTPUT_DIR := data/evals
 
 VAULT_DOCS_ROOT := /vault/15_Dokumentation
 VAULT_PREPARE_OUTPUT := data/datasets/train.jsonl
@@ -68,7 +69,7 @@ SWAP_GATE_MEM_MIN_KB ?= 2000000
 	prepare-dataset-exact prepare-dataset-augmented \
 	self-edits tensorboard \
 	real-run-short real-run-continue run-status nightly-run promote-latest-ok \
-	serve-up serve-down serve-logs serve-health serve-reload \
+	serve-up serve-down serve-logs serve-health serve-reload serve-test \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
 	retention-clean clean-smoke clean-data reset-runtime
 
@@ -111,6 +112,7 @@ help:
 	@echo "  serve-logs                 - Tail serving logs"
 	@echo "  serve-health               - Query serving health endpoint"
 	@echo "  serve-reload               - Reload serving model from LATEST_OK pointer"
+	@echo "  serve-test                 - Run standardized serving smoke prompts and write report to data/evals"
 	@echo "  smoke                      - End-to-end smoke workflow (check/build/up/train/infer/report)"
 	@echo "  retention-clean            - Keep only latest N run-like dirs in models/logs/evals (default N=3)"
 	@echo "  clean-smoke                - Remove smoke outputs"
@@ -582,6 +584,12 @@ serve-health:
 
 serve-reload:
 	@curl -fsS -X POST http://127.0.0.1:$(SERVE_PORT)/reload
+
+serve-test:
+	@echo "##############"
+	@echo "### STEP serve-test: standardized serving smoke prompts"
+	@echo "##############"
+	@OUT_DIR=$(SERVE_SMOKE_OUTPUT_DIR) bash ./scripts/serve_smoke.sh
 
 # Orchestrator:
 # 1) preflight

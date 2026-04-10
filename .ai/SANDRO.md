@@ -180,8 +180,24 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - Startverhalten ohne `LATEST_OK_ADAPTER_ID` auf „degraded statt crash“ umgestellt.
     - `/health` liefert jetzt auch im Degraded-Status strukturierte Zustandsinformationen (`status`, `message`, Pointer-/Adapter-Kontext).
     - `/v1/chat/completions` liefert bei nicht geladenem Modell deterministisch `503` mit klarer Ursache statt Laufzeitcrash.
-    - Generierungsdefaults gegen Looping verschärft (`repetition_penalty`, optional `no_repeat_ngram_size`, plus Postprocessing bei wiederholten Wrapper-Tokens).
+    - Generierungsdefaults gegen Looping verschärft (`repetition_penalty`, `no_repeat_ngram_size`, begrenzte `max_new_tokens`-Obergrenze für Serving).
+    - Prompt-Härtung ergänzt:
+      - feste Systemregel („nur finale Antwort“, keine Template-Tokens ausgeben)
+      - Stop-/Cut-Logik auf `###`-Marker
+      - Wrapper-Sanitizer für typische Tokens (`Kontext:`, `Antwort:`, `Instruction:` etc.)
+    - Tool-less RAG-light / FAQ-MVP ergänzt:
+      - feste Repo-Fakten für häufige Fragen (u. a. `docker/compose.serve.yaml`, `docker/compose.yaml`, `make preflight`)
+      - deterministische Kurzantworten für klar definierte Standardprompts.
     - Betriebsprinzip bestätigt: Auditierbare Trennung zwischen „Service läuft“ und „modellseitig bereit“ bleibt erhalten.
+  - Serving-Smoke-Test-Prozess ergänzt:
+    - neues Skript `scripts/serve_smoke.sh` für standardisierte Prompt-Regression gegen `/v1/chat/completions`.
+    - neues Make-Target `make serve-test`.
+    - Report-Ausgabe nach `data/evals/serve_smoke_<timestamp>.txt`.
+    - Abnahmekriterium im Smoke: keine Wrapper-/Template-Leaks (`### Input`, `### Response`, `### Instruction`, `Kontext:`, `Antwort:`).
+  - OOM-/Fragmentierungs-Maßnahme verbindlich dokumentiert:
+    - `.env.example` enthält `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`.
+    - Variable wird durch Training- und Serving-Compose an Container durchgereicht.
+    - Troubleshooting-Doku verweist explizit auf diese Option bei sporadischen OOMs im Modell-Load/Eval.
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.
