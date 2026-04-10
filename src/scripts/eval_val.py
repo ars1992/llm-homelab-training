@@ -446,22 +446,53 @@ def evaluate_item(
             for original in expected_contains
         ]
 
-        # exact mode with candidate extraction:
-        # normalize output, extract best candidate for each expected token, then exact compare.
-        exact_found: List[str] = []
-        best_candidate: Optional[str] = None
-        for original, nrm in exp_norm_pairs:
-            candidate = extract_candidate_for_exact(pred_norm, nrm) or pred_norm
+        # exact mode with deterministic single-value handling:
+        # if there is exactly one expected value, evaluate only the extracted candidate.
+        if len(exp_norm_pairs) == 1:
+            original, expected_norm = exp_norm_pairs[0]
+            candidate_raw = (
+                extract_candidate_for_exact(pred_norm, expected_norm) or pred_norm
+            )
             candidate_norm = normalize_exact_text(
-                candidate,
+                candidate_raw,
                 trim_whitespace=exact_trim_whitespace,
                 case_sensitive=exact_case_sensitive,
                 strip_wrappers=exact_strip_wrappers,
                 first_line_only=exact_first_line_only,
             )
+
+            passed = candidate_norm == expected_norm
+            return {
+                "pass": passed,
+                "coverage": 1.0 if passed else 0.0,
+                "hits": 1 if passed else 0,
+                "total_expected": 1,
+                "found_expected_contains": [original] if passed else [],
+                "missing_expected_contains": [] if passed else [original],
+                "fail_reason": None if passed else "exact_mismatch",
+                "exact_candidate": candidate_raw,
+                "exact_expected_norm": expected_norm,
+                "exact_prediction_norm": pred_norm,
+                "exact_candidate_norm": candidate_norm,
+            }
+
+        # fallback for multi-value exact cases
+        exact_found: List[str] = []
+        best_candidate_raw: Optional[str] = None
+        best_candidate_norm: Optional[str] = None
+        for original, nrm in exp_norm_pairs:
+            candidate_raw = extract_candidate_for_exact(pred_norm, nrm) or pred_norm
+            candidate_norm = normalize_exact_text(
+                candidate_raw,
+                trim_whitespace=exact_trim_whitespace,
+                case_sensitive=exact_case_sensitive,
+                strip_wrappers=exact_strip_wrappers,
+                first_line_only=exact_first_line_only,
+            )
+            best_candidate_raw = candidate_raw
+            best_candidate_norm = candidate_norm
             if candidate_norm == nrm:
                 exact_found.append(original)
-                best_candidate = candidate
                 break
 
         missing = [] if exact_found else expected_contains[:]
@@ -477,7 +508,12 @@ def evaluate_item(
             "found_expected_contains": exact_found,
             "missing_expected_contains": missing,
             "fail_reason": fail_reason,
-            "exact_candidate": best_candidate if passed else pred_norm,
+            "exact_candidate": best_candidate_raw
+            if best_candidate_raw is not None
+            else pred_norm,
+            "exact_expected_norm": None,
+            "exact_prediction_norm": pred_norm,
+            "exact_candidate_norm": best_candidate_norm,
         }
 
     # non-exact (substring coverage)
@@ -528,6 +564,9 @@ def evaluate_item(
         "missing_expected_contains": missing,
         "fail_reason": fail_reason,
         "exact_candidate": None,
+        "exact_expected_norm": None,
+        "exact_prediction_norm": None,
+        "exact_candidate_norm": None,
     }
 
 
@@ -758,6 +797,9 @@ def main() -> None:
             "missing_expected_contains": verdict["missing_expected_contains"],
             "fail_reason": verdict["fail_reason"],
             "exact_candidate": verdict.get("exact_candidate"),
+            "exact_expected_norm": verdict.get("exact_expected_norm"),
+            "exact_prediction_norm": verdict.get("exact_prediction_norm"),
+            "exact_candidate_norm": verdict.get("exact_candidate_norm"),
             "output_preview": preview_text(prediction, output_preview_chars),
             "normalized_output_preview": preview_text(
                 normalized_preview, output_preview_chars

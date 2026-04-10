@@ -198,6 +198,66 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - `.env.example` enthält `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`.
     - Variable wird durch Training- und Serving-Compose an Container durchgereicht.
     - Troubleshooting-Doku verweist explizit auf diese Option bei sporadischen OOMs im Modell-Load/Eval.
+  - Lesbarkeitspräferenz für Betriebsausgaben ergänzt (Nightly/Promotion):
+    - Zwischen `### STEP ...`-Abschnitten soll eine Leerzeile stehen.
+    - Am Ende der Promotion soll ein kompakter, gut lesbarer Report erscheinen.
+    - Reportformat soll IST/SOLL je KPI enthalten (inkl. Pass/Fail-Flag), damit das Ergebnis ohne Nachrechnen sofort erkennbar ist.
+    - Diese Darstellung ist als Standard für zukünftige Orchestrator-Ausgaben beizubehalten.
+  - Nightly-Ergebnis dokumentiert (Run `real-20260410T124540Z`):
+    - Eval-Run: `val-real-20260410T124540Z-20260410T151002Z`
+    - Promotion-Entscheidung: `kept_previous`
+    - KPI-Befund:
+      - `pass_rate_exact_openbook` IST `0.75`, SOLL `>= 0.60` (erfüllt)
+      - `avg_coverage_runbook_openbook` IST `0.04523809523809523`, SOLL `>= 0.30` (nicht erfüllt)
+    - Konsequenz:
+      - `LATEST_OK_ADAPTER_ID` bleibt auf `real-20260409T085547Z`
+      - `LATEST_OK_ADAPTER_PATH` bleibt damit bewusst auf dem zuletzt fachlich freigegebenen Adapter
+      - Trennung `LATEST_REALRUN_ID` (technisch neuester Lauf) vs. `LATEST_OK_ADAPTER_ID` (freigegebener Serving-Stand) wurde im Betrieb bestätigt
+  - Exact-Eval-Bugdiagnostik ergänzt:
+    - Muster identifiziert: `exact_mismatch`, obwohl `exact_candidate`/`normalized_output_preview` visuell dem erwarteten Wert entspricht.
+    - Betroffene Beispiel-Fälle im Report: u. a. `val-002`, `val-014`.
+    - Arbeitsregel:
+      - Single-Value-Exact-Fälle deterministisch über Kandidat-vs-Erwartung prüfen.
+      - Wenn `exact_candidate == expected`, muss `pass=True` gesetzt werden.
+    - Zusätzliche Diagnostikfelder für Audit/Root-Cause festhalten:
+      - `exact_expected_norm`
+      - `exact_prediction_norm`
+      - `exact_candidate_norm`
+    - Ergänzender Prüfpfad etabliert: Report-basierter Exact-Regressionscheck auf „suspicious exact mismatch“.
+  - Serving-Qualitätssicherung konkretisiert:
+    - `make serve-test` ist als Standard-Smoke für saubere Antwortformate festgelegt.
+    - Akzeptanzkriterium bleibt: keine Wrapper-/Template-Leaks (`### Input`, `### Response`, `### Instruction`, `Kontext:`, `Antwort:`).
+  - Runbook-Gate-Strategie und Generator-Pipeline ergänzt:
+    - Zielbild: `avg_coverage_runbook_openbook >= 0.30` über systematisch erzeugte, hochwertige Runbook-Trainingsvarianten statt manueller Einzelpflege.
+    - Neues Skript: `src/scripts/generate_runbook_samples.py`.
+    - Eingabe: `data/datasets/val.jsonl` (nur `val-rb-*` Cases).
+    - Ausgabe (deterministisch, overwrite): `data/datasets/runbook_samples.jsonl`.
+    - Standardparameter:
+      - `--variants-per-case 25`
+      - `--seed 1337`
+      - optional `--report-json data/datasets/runbook_samples.report.json`
+      - optional `--dry-run`
+    - Generator-Regeln (verbindlich):
+      - jede Variante enthält alle `expected_contains`-Substrings des jeweiligen `val-rb-*` Cases vollständig.
+      - 8–12 Schritte pro Antwort (aktuell konservativ 10 Schritte als stabiler Default).
+      - Pflichtstruktur enthalten:
+        - Schritt 1: Status erfassen / Baseline
+        - mindestens ein Schritt: Änderung durchführen
+        - mindestens ein Schritt: Persistenz/Config
+        - letzter Schritt: Verify
+      - Varianten sind dedupe-sicher durch deterministische Textvariation (Step-Labels, Reihenfolge, kurze Begründungssätze, Variantenkennung).
+    - Harte Sanity-Gates im Generator (Exit 1 bei Fail):
+      - Output-Datei vorhanden und Zeilenzahl >= `10 * variants_per_case`.
+      - pro erzeugtem Sample sind alle `expected_contains` des Source-Cases enthalten.
+      - JSONL ist zeilenweise valides JSON.
+    - Makefile-Integration dokumentiert:
+      - neues Target: `make runbook-samples-generate`
+      - `prepare-dataset-augmented` ruft den Generator automatisch vor dem Merge auf.
+      - Merge-Pfad bleibt: `train_vault.jsonl` + `exact_extraction_samples.jsonl` + `runbook_samples.jsonl` -> `train.jsonl`.
+    - Determinismus-Nachweis:
+      - bei identischem Input + Seed sind erzeugte JSONL-Dateien byte-identisch (Hashvergleich als Betriebscheck).
+    - Betriebsentscheidung:
+      - Runbook-Samples werden als aktiver Hebel zur Gate-Verbesserung geführt, bevor größere Architekturerweiterungen (z. B. SEAL-Loop) priorisiert werden.
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.

@@ -55,6 +55,7 @@ EXACT_EXTRACTION_VAULT := /vault/exact_extraction
 EXACT_EXTRACTION_OUTPUT := data/datasets/exact_extraction_samples.jsonl
 EXACT_EXTRACTION_REPORT := data/datasets/exact_extraction_report.json
 RUNBOOK_SAMPLES := data/datasets/runbook_samples.jsonl
+RUNBOOK_SAMPLES_REPORT := data/datasets/runbook_samples.report.json
 VAL_VALIDATE_REPORT := data/datasets/val_validate_report.json
 
 RUN_LOCK_FILE := $(RUN_STATE_DIR)/LOCK
@@ -66,7 +67,7 @@ SWAP_GATE_MEM_MIN_KB ?= 2000000
 	build up limit-cpu swap-reset check-single-flight lock-status lock-clear swap-gate-train swap-gate-eval down restart ps logs shell \
 	ensure-data-dirs \
 	train eval eval-val validate-val prepare-dataset prepare-dataset-vault \
-	prepare-dataset-exact prepare-dataset-augmented \
+	prepare-dataset-exact runbook-samples-generate prepare-dataset-augmented \
 	self-edits tensorboard \
 	real-run-short real-run-continue run-status nightly-run promote-latest-ok \
 	serve-up serve-down serve-logs serve-health serve-reload serve-test \
@@ -100,6 +101,7 @@ help:
 	@echo "  prepare-dataset-vault      - Build train.jsonl from /vault/15_Dokumentation markdown files"
 	@echo "  prepare-dataset-exact      - Extract exact_extraction samples from /vault/exact_extraction MD files"
 	@echo "  prepare-dataset-augmented  - Vault dataset + append exact_extraction + runbook samples -> train.jsonl"
+	@echo "  runbook-samples-generate   - Generate deterministic runbook_samples.jsonl from val-rb-* cases"
 	@echo "  self-edits                 - Generate placeholder self-edit candidates"
 	@echo "  tensorboard                - Start tensorboard in container (port 6006)"
 	@echo "  real-run-short             - Fresh short run (new adapter from base model)"
@@ -371,6 +373,16 @@ validate-val:
 		--verbose \
 		--report $(VAL_VALIDATE_REPORT)
 
+# C2: Deterministic runbook sample generation from val-rb-* cases.
+# Host-side by design for reproducibility against committed val.jsonl.
+runbook-samples-generate:
+	@python3 src/scripts/generate_runbook_samples.py \
+		--val-jsonl $(VAL_REG_DATASET) \
+		--output-jsonl $(RUNBOOK_SAMPLES) \
+		--variants-per-case 25 \
+		--seed 1337 \
+		--report-json $(RUNBOOK_SAMPLES_REPORT)
+
 # C1: Extract exact_extraction samples from MD triplets (## Instruction/Input/Output).
 # Graceful: skips with WARN if /vault/exact_extraction is not mounted.
 prepare-dataset-exact: up
@@ -389,17 +401,18 @@ prepare-dataset-exact: up
 		echo "INFO: Seed file $(EXACT_EXTRACTION_OUTPUT) will be used if it exists (checked during augment step)."; \
 	fi
 
-# C1+C3: Augmented dataset build:
+# C1+C2+C3: Augmented dataset build:
 #   1. Vault markdown extraction -> data/datasets/train_vault.jsonl
 #   2. Exact extraction samples from MD triplets (if vault mounted, else seed file used)
-#   3. Merge vault + exact_extraction + runbook samples -> train.jsonl (deduplicated)
+#   3. Deterministic runbook sample generation -> data/datasets/runbook_samples.jsonl
+#   4. Merge vault + exact_extraction + runbook samples -> train.jsonl (deduplicated)
 # Use this instead of prepare-dataset-vault when supplemental samples should be included.
 prepare-dataset-augmented: up
 	@echo "##############"
 	@echo "### STEP prepare-dataset-augmented: build merged train dataset"
 	@echo "##############"
 	@set -e; \
-	echo "INFO: Step 1/3 — Vault markdown extraction -> train_vault.jsonl"; \
+	echo "INFO: Step 1/4 — Vault markdown extraction -> train_vault.jsonl"; \
 	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
 		--mode vault_md \
 		--vault-root $(VAULT_DOCS_ROOT) \
@@ -408,9 +421,11 @@ prepare-dataset-augmented: up
 		--max-samples 4000 \
 		--redact-secrets true \
 		--report data/datasets/prepare_vault_report.json; \
-	echo "INFO: Step 2/3 — Exact extraction samples (vault or seed)"; \
+	echo "INFO: Step 2/4 — Exact extraction samples (vault or seed)"; \
 	$(MAKE) prepare-dataset-exact; \
-	echo "INFO: Step 3/3 — Merging all sources -> train.jsonl"; \
+	echo "INFO: Step 3/4 — Generate deterministic runbook samples"; \
+	$(MAKE) runbook-samples-generate; \
+	echo "INFO: Step 4/4 — Merging all sources -> train.jsonl"; \
 	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/merge_datasets.py \
 		--sources \
 			data/datasets/train_vault.jsonl \
@@ -517,6 +532,7 @@ promote-latest-ok:
 	@echo "##############"
 	@echo "### STEP promote-latest-ok: evaluate promotion decision"
 	@echo "##############"
+	@echo ""
 	@set -e; \
 	if [ ! -f $(LATEST_REALRUN_ID_FILE) ]; then \
 		echo "WARN: missing $(LATEST_REALRUN_ID_FILE). Promotion skipped."; \
@@ -548,21 +564,35 @@ promote-latest-ok:
 		echo "WARN: missing $$REPORT_PATH. Promotion skipped."; \
 		exit 0; \
 	fi; \
-	PROMOTE_RESULT=$$(python3 -c "import json,sys; p='$$REPORT_PATH'; data=json.load(open(p,'r',encoding='utf-8')); s=data.get('summary',{}); pass_exact=float(s.get('pass_rate_exact_openbook',0.0)); cov_runbook=float(s.get('avg_coverage_runbook_openbook',0.0)); ok=(pass_exact >= float('$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK)') and cov_runbook >= float('$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK)')); print('PROMOTE' if ok else 'KEEP'); print(pass_exact); print(cov_runbook)"); \
+	PROMOTE_RESULT=$$(python3 -c "import json; p='$$REPORT_PATH'; data=json.load(open(p,'r',encoding='utf-8')); s=data.get('summary',{}); pass_exact=float(s.get('pass_rate_exact_openbook',0.0)); cov_runbook=float(s.get('avg_coverage_runbook_openbook',0.0)); pass_ok=pass_exact >= float('$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK)'); cov_ok=cov_runbook >= float('$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK)'); ok=(pass_ok and cov_ok); print('PROMOTE' if ok else 'KEEP'); print(pass_exact); print(cov_runbook); print('1' if pass_ok else '0'); print('1' if cov_ok else '0')"); \
 	DECISION=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '1p'); \
 	PASS_EXACT=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '2p'); \
 	COVERAGE_RUNBOOK=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '3p'); \
+	PASS_EXACT_OK=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '4p'); \
+	COVERAGE_RUNBOOK_OK=$$(printf '%s\n' "$$PROMOTE_RESULT" | sed -n '5p'); \
 	PREV_OK_ID=""; \
 	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then PREV_OK_ID=$$(cat $(LATEST_OK_ADAPTER_ID_FILE)); fi; \
 	if [ "$$DECISION" = "PROMOTE" ]; then \
 		echo "$$RUN_ID" > $(LATEST_OK_ADAPTER_ID_FILE); \
 		echo "data/models/$$RUN_ID" > $(LATEST_OK_ADAPTER_PATH_FILE); \
 		python3 -c "import json; data={'run_id':'$$RUN_ID','eval_run_id':'$$EVAL_RUN_ID','decision':'promoted','previous_ok_run_id':'$$PREV_OK_ID','new_ok_run_id':'$$RUN_ID','thresholds':{'pass_rate_exact_openbook_min':float('$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK)'),'avg_coverage_runbook_openbook_min':float('$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK)')},'observed':{'pass_rate_exact_openbook':float('$$PASS_EXACT'),'avg_coverage_runbook_openbook':float('$$COVERAGE_RUNBOOK')}}; open('$(LATEST_PROMOTION_SUMMARY_FILE)','w',encoding='utf-8').write(json.dumps(data,ensure_ascii=False,indent=2))"; \
-		echo "PROMOTED: $$RUN_ID (pass_rate_exact_openbook=$$PASS_EXACT avg_coverage_runbook_openbook=$$COVERAGE_RUNBOOK)"; \
+		echo "PROMOTED: $$RUN_ID"; \
 	else \
 		python3 -c "import json; data={'run_id':'$$RUN_ID','eval_run_id':'$$EVAL_RUN_ID','decision':'kept_previous','previous_ok_run_id':'$$PREV_OK_ID','new_ok_run_id':'$$PREV_OK_ID','thresholds':{'pass_rate_exact_openbook_min':float('$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK)'),'avg_coverage_runbook_openbook_min':float('$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK)')},'observed':{'pass_rate_exact_openbook':float('$$PASS_EXACT'),'avg_coverage_runbook_openbook':float('$$COVERAGE_RUNBOOK')}}; open('$(LATEST_PROMOTION_SUMMARY_FILE)','w',encoding='utf-8').write(json.dumps(data,ensure_ascii=False,indent=2))"; \
 		echo "KEPT_PREVIOUS_OK: $$PREV_OK_ID (candidate $$RUN_ID below thresholds)"; \
-	fi
+	fi; \
+	echo ""; \
+	echo "PROMOTION REPORT"; \
+	echo "  run_id: $$RUN_ID"; \
+	echo "  eval_run_id: $$EVAL_RUN_ID"; \
+	echo "  decision: $$DECISION"; \
+	echo "  exact_openbook pass_rate IST=$$PASS_EXACT SOLL>=$(PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK) ok=$$PASS_EXACT_OK"; \
+	echo "  runbook_openbook avg_coverage IST=$$COVERAGE_RUNBOOK SOLL>=$(PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK) ok=$$COVERAGE_RUNBOOK_OK"; \
+	echo "  previous_ok_run_id: $$PREV_OK_ID"; \
+	if [ -f $(LATEST_OK_ADAPTER_ID_FILE) ]; then \
+		echo "  new_ok_run_id: $$(cat $(LATEST_OK_ADAPTER_ID_FILE))"; \
+	fi; \
+	echo ""
 
 serve-up:
 	@echo "##############"
@@ -605,6 +635,7 @@ nightly-run: preflight validate-val prepare-dataset-augmented check-single-fligh
 	@echo "##############"
 	@echo "### STEP nightly-run: full automated pipeline"
 	@echo "##############"
+	@echo ""
 	@set -e; \
 	$(MAKE) lock-status; \
 	$(MAKE) swap-gate-eval; \

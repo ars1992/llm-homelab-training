@@ -132,6 +132,89 @@ Hinweis zu Continue-Priorität und Stabilitäts-Gates:
 `make eval-val`
 `make down`
 
+## Aktuelle Betriebs-Ergänzungen (Stand: 2026-04-10)
+
+### Nightly-Ergebnis (letzter Lauf)
+- Letzter technischer Real-Run: `real-20260410T124540Z`
+- Zugehöriger Eval-Run: `val-real-20260410T124540Z-20260410T151002Z`
+- Promotion-Entscheidung: `kept_previous`
+- Begründung:
+  - `pass_rate_exact_openbook`: IST `0.75`, SOLL `>= 0.60` (erfüllt)
+  - `avg_coverage_runbook_openbook`: IST `0.04523809523809523`, SOLL `>= 0.30` (nicht erfüllt)
+- Konsequenz:
+  - `LATEST_OK_ADAPTER_ID` und `LATEST_OK_ADAPTER_PATH` bleiben unverändert auf dem zuletzt freigegebenen Adapter.
+  - Serving bleibt bewusst stabil auf dem vorherigen OK-Stand.
+
+### Serving-Sauberkeit / Smoke-Regression
+- Standardisierter Serving-Smoke ist als Betriebsprozess vorhanden:
+  - `make serve-test`
+  - schreibt Report nach `data/evals/serve_smoke_<timestamp>.txt`
+- Aktuelle Standardfälle:
+  1. Pfadfrage Serving-Compose
+  2. Exakter `make preflight`-Befehl
+  3. Ein-Wort-Antwort `OK`
+- Abnahmekriterium:
+  - Keine Template-/Wrapper-Leaks wie `### Input:`, `### Response:`, `### Instruction:`, `Kontext:`, `Antwort:`
+
+### Allocator-/OOM-Absicherung
+- Reproduzierbare Env-Verdrahtung für Fragmentierungsmitigation gesetzt:
+  - `.env.example`: `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`
+  - Durchreichung in:
+    - `docker/compose.yaml` (trainer)
+    - `docker/compose.serve.yaml` (serve)
+- Betriebsregel:
+  - Bei sporadischen OOMs im Modell-Load/Eval zuerst diese Einstellung aktiv halten und Container neu starten, bevor tiefere Parameteränderungen erfolgen.
+
+### Automatisierte Runbook-Sample-Generierung (neu)
+- Neues Generator-Skript:
+  - `src/scripts/generate_runbook_samples.py`
+- Zweck:
+  - deterministic Ausbau von `data/datasets/runbook_samples.jsonl` aus `data/datasets/val.jsonl` (nur `val-rb-*` Fälle), um das Gate `avg_coverage_runbook_openbook` systematisch zu verbessern.
+- Standardparameter:
+  - `--variants-per-case 25`
+  - `--seed 1337`
+  - `--val-jsonl data/datasets/val.jsonl`
+  - `--output-jsonl data/datasets/runbook_samples.jsonl`
+  - optional `--report-json data/datasets/runbook_samples.report.json`
+  - optional `--dry-run`
+- Generator-Regeln:
+  - Jede Variante enthält alle `expected_contains`-Tokens des jeweiligen `val-rb-*` Falls vollständig.
+  - Jede Variante enthält 8–12 Schritte (aktuell stabil: 10 Schritte).
+  - Strukturvorgaben je Variante:
+    1. Schritt 1: Status erfassen / Baseline
+    2. mindestens ein Schritt: Änderung durchführen
+    3. mindestens ein Schritt: Persistenz/Config
+    4. letzter Schritt: Verify
+  - Varianten sind dedupe-sicher durch deterministische Variation (Step-Label, Reihenfolge, kurze Begründungssätze, Variantenkennung).
+- Harte Sanity-Checks (Exit 1 bei Verstoß):
+  1. Output existiert und hat mindestens `10 * variants_per_case` Zeilen.
+  2. Jeder erzeugte Output enthält vollständig alle erwarteten Substrings seines Quellfalls.
+  3. JSONL ist zeilenweise valides JSON.
+- Makefile-Integration:
+  - Neues Target: `make runbook-samples-generate`
+  - `prepare-dataset-augmented` führt den Generator vor dem Merge automatisch aus.
+  - Merging bleibt:
+    - `train_vault.jsonl`
+    - `exact_extraction_samples.jsonl`
+    - `runbook_samples.jsonl`
+    - => `train.jsonl`
+- Nightly-Integration:
+  - Da `nightly-run` `prepare-dataset-augmented` verwendet, werden frische Runbook-Samples automatisch in jedem Nightly-Lauf berücksichtigt.
+- Nachweis:
+  - Mit 10 `val-rb-*` Fällen und `25` Varianten werden deterministisch `250` Samples erzeugt.
+
+### Exact-Eval-Diagnostik (Regression)
+- Beobachtetes Muster im alten Report:
+  - Einzelfälle mit `fail_reason=exact_mismatch`, obwohl `exact_candidate` visuell dem erwarteten Wert entsprach.
+- Umgesetzte Härtung:
+  - Single-Value-Exact-Fälle werden deterministisch über Kandidat-vs-Erwartung verglichen.
+  - Zusätzliche Debugfelder im Eval-Output:
+    - `exact_expected_norm`
+    - `exact_prediction_norm`
+    - `exact_candidate_norm`
+- Zusätzlicher Prüfpfad:
+  - `scripts/eval_exact_regression_check.py` zur gezielten Erkennung verdächtiger Exact-Mismatch-Fälle in bestehenden Reports.
+
 ## Output-Konventionen
 - LoRA-Adapter: `data/models/<run-id>/`
 - Trainingslogs: `data/logs/<run-id>/`
@@ -287,6 +370,7 @@ Nach jedem Real-Run dokumentieren:
 - `make serve-logs`
 - `make serve-health`
 - `make serve-reload`
+- `make serve-test`
 
 ### OpenClaw-Anbindung
 - OpenClaw spricht den Serving-Service über die OpenAI-kompatible API an.
@@ -303,6 +387,11 @@ Nach jedem Real-Run dokumentieren:
 ### Aktuelle Start-Schwellenwerte für Promotion
 - `pass_rate_exact_openbook >= 0.60`
 - `avg_coverage_runbook_openbook >= 0.30`
+
+### Lesbare Promotionsausgabe (Operator-UX)
+- Promotion-Ausgabe enthält zusätzlich einen kompakten IST/SOLL-Block je KPI.
+- Zwischen STEP-Blöcken wird eine Leerzeile ausgegeben, damit Nightly-Logs schneller auditierbar sind.
+- Ziel: Entscheidung (`PROMOTE` vs. `KEEP`) sofort nachvollziehbar ohne manuelles Nachrechnen.
 
 ### Audit-Artefakte der Promotion
 - Referenzierter Kandidat: `data/runs/LATEST_REALRUN_ID`
