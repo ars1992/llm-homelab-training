@@ -1,78 +1,84 @@
-# Minimal smoke-test config for fast LoRA verification runs.
-# Purpose:
-# - validate container, model loading, tokenization, trainer loop, and artifact writing
-# - complete quickly on constrained hardware (including K80)
+# Smoke-LoRA-Konfiguration für schnelle technische Verifikation.
+#
+# Ziel dieses Profils:
+# - End-to-End-Funktionsprüfung (Daten laden -> Tokenisierung -> Trainer-Loop -> Artefakte schreiben)
+# - möglichst kurzer Lauf auf eingeschränkter Hardware (z. B. K80)
+# - reproduzierbare, risikoarme Baseline vor längeren Real-Runs
+#
+# Wichtiger Hinweis:
+# - Diese Konfiguration ist NICHT für Qualitäts-Benchmarking gedacht.
+# - Ein "grüner" Smoke-Run bedeutet primär: Infrastruktur/Workflow funktioniert technisch.
 
 run:
-  run_id: ""
-  run_id_prefix: "smoke-lora"
-  seed: 42
+    run_id: "" # Zweck: explizite Run-ID (optional). Auswirkung: leer = Skript erzeugt automatisch Run-ID; gesetzt = reproduzierbarer Referenzname.
+    run_id_prefix: "smoke-lora" # Zweck: Präfix für automatisch erzeugte Run-IDs. Auswirkung: erleichtert Filterung/Retention von Smoke-Artefakten.
+    seed: 42 # Zweck: deterministische Initialisierung (best effort). Auswirkung: reduziert Zufallsdrift zwischen identischen Smoke-Läufen.
 
 paths:
-  # Provide a tiny dataset (recommended: 8-32 samples).
-  dataset_jsonl: "data/datasets/smoke_train.jsonl"
-  model_output_root: "data/models"
-  log_output_root: "data/logs"
+    # Empfohlenes Smoke-Dataset: sehr klein (z. B. 8-32 Samples), um Laufzeit zu minimieren.
+    dataset_jsonl: "data/datasets/smoke_train.jsonl" # Zweck: Eingabedatensatz für Smoke-Training. Auswirkung: Inhalt bestimmt nur technische Durchgängigkeit, nicht finale Modellqualität.
+    model_output_root: "data/models" # Zweck: Root-Pfad für gespeicherte Adapter-Artefakte. Auswirkung: Smoke-Runs landen getrennt in eigenen Run-Ordnern.
+    log_output_root: "data/logs" # Zweck: Root-Pfad für Logs (z. B. TensorBoard). Auswirkung: ermöglicht schnelle Diagnose bei Fehlern im Trainer-Loop.
 
 model:
-  # Keep aligned with your default baseline unless explicitly testing another model.
-  base_model_name: "facebook/opt-2.7b"
-  trust_remote_code: false
-  use_fast_tokenizer: true
+    # Basismodell sollte mit Projektstandard übereinstimmen, außer es wird gezielt ein Modellwechsel getestet.
+    base_model_name: "facebook/opt-2.7b" # Zweck: Modellbasis für LoRA-Adaptertraining. Auswirkung: beeinflusst VRAM-Bedarf, Ladezeit und Kompatibilität.
+    trust_remote_code: false # Zweck: verhindert Ausführung fremden Modellcodes. Auswirkung: erhöht Sicherheit/Reproduzierbarkeit; kann exotische Modelle ausschließen.
+    use_fast_tokenizer: true # Zweck: schnelle Tokenisierung. Auswirkung: kürzere Vorverarbeitungszeit, besonders relevant bei wiederholten Testläufen.
 
 data:
-  format: "instruction_input_output_jsonl"
-  max_seq_length: 256
-  truncation: true
-  packing: false
-  num_proc: 1
+    format: "instruction_input_output_jsonl" # Zweck: erwartetes Datensatzschema. Auswirkung: falsches Format führt zu Parse-/Mapping-Fehlern.
+    max_seq_length: 256 # Zweck: Token-Längenlimit pro Sample. Auswirkung: zentraler VRAM-Hebel; klein = stabiler, aber mehr Trunkierung.
+    truncation: true # Zweck: überlange Samples werden abgeschnitten. Auswirkung: verhindert OOM, kann aber Informationsverlust verursachen.
+    packing: false # Zweck: kein Sample-Packing. Auswirkung: stabileres Verhalten pro Beispiel, aber geringerer Durchsatz.
+    num_proc: 1 # Zweck: parallele Prozesszahl bei Datentransformation. Auswirkung: niedriger RAM-Druck, weniger Host-Spitzenlast.
 
 lora:
-  task_type: "CAUSAL_LM"
-  r: 4
-  alpha: 8
-  dropout: 0.05
-  bias: "none"
-  target_modules:
-    - "q_proj"
-    - "k_proj"
-    - "v_proj"
-    - "o_proj"
+    task_type: "CAUSAL_LM" # Zweck: LoRA-Aufgabentyp passend für autoregressive Sprachmodelle. Auswirkung: falscher Typ kann zu inkonsistenter/fehlerhafter Anpassung führen.
+    r: 4 # Zweck: LoRA-Rank (Adapter-Kapazität) im Smoke bewusst klein. Auswirkung: sehr niedriger Speicherbedarf, geringere Ausdrucksstärke (für Smoke ausreichend).
+    alpha: 8 # Zweck: LoRA-Skalierung. Auswirkung: steuert effektive Stärke der Adapter-Updates.
+    dropout: 0.05 # Zweck: Regularisierung auf LoRA-Pfad. Auswirkung: leicht robustere Generalisierung, minimal langsamer.
+    bias: "none" # Zweck: Bias-Parameter nicht mittrainieren. Auswirkung: weniger trainierbare Parameter, stabil/leichtgewichtig.
+    target_modules:
+        - "q_proj" # Zweck: Attention-Query-Projektion anpassen. Auswirkung: zentrale Kontrollstelle für Prompt-/Kontextverarbeitung.
+        - "k_proj" # Zweck: Attention-Key-Projektion anpassen. Auswirkung: beeinflusst Kontextadressierung.
+        - "v_proj" # Zweck: Attention-Value-Projektion anpassen. Auswirkung: beeinflusst eingebrachten Informationsinhalt.
+        - "o_proj" # Zweck: Attention-Output-Projektion anpassen. Auswirkung: beeinflusst zusammengesetzte Attention-Ausgabe.
 
 training:
-  # Smoke behavior: short deterministic run.
-  num_train_epochs: 1
-  max_steps: 5
+    # Smoke-Verhalten: kurz und deterministisch.
+    num_train_epochs: 1 # Zweck: maximal ein Datensatzdurchlauf. Auswirkung: minimiert Laufzeit.
+    max_steps: 5 # Zweck: harte Obergrenze der Trainingsschritte. Auswirkung: garantiert kurzen Testlauf unabhängig von Datensatzgröße.
 
-  per_device_train_batch_size: 1
-  per_device_eval_batch_size: 1
-  gradient_accumulation_steps: 1
+    per_device_train_batch_size: 1 # Zweck: Mikro-Batchgröße pro Gerät. Auswirkung: minimale VRAM-Last, langsamer Durchsatz.
+    per_device_eval_batch_size: 1 # Zweck: Eval-Batchgröße (falls verwendet). Auswirkung: konservativer Speicherbedarf.
+    gradient_accumulation_steps: 1 # Zweck: keine zusätzliche Akkumulation im Smoke. Auswirkung: einfaches, transparentes Step-Verhalten.
 
-  learning_rate: 0.0002
-  lr_scheduler_type: "cosine"
-  warmup_ratio: 0.0
-  weight_decay: 0.0
-  max_grad_norm: 1.0
+    learning_rate: 0.0002 # Zweck: Lernrate. Auswirkung: für Smoke ausreichend, nicht auf Qualitätsoptimum getunt.
+    lr_scheduler_type: "cosine" # Zweck: Lernratenverlauf. Auswirkung: sanfter Verlauf, im sehr kurzen Smoke-Lauf praktisch geringer Effekt.
+    warmup_ratio: 0.0 # Zweck: kein Warmup im Smoke. Auswirkung: schnellere direkte Tests, etwas höheres Instabilitätsrisiko bei längeren Runs.
+    weight_decay: 0.0 # Zweck: keine L2-Regularisierung. Auswirkung: simpler Testpfad ohne zusätzlichen Regularisierungseinfluss.
+    max_grad_norm: 1.0 # Zweck: Gradient Clipping. Auswirkung: schützt vor Gradientenexplosion, stabilisiert auch kurze Tests.
 
-  # K80-safe defaults
-  fp16: true
-  bf16: false
-  tf32: false
+    # K80-kompatible Präzisionseinstellungen
+    fp16: true # Zweck: Half Precision zur Speicherreduktion. Auswirkung: deutlich weniger VRAM-Bedarf; potenziell sensibler numerisch.
+    bf16: false # Zweck: bfloat16 deaktiviert (auf K80 i. d. R. nicht nutzbar). Auswirkung: vermeidet Kompatibilitätsfehler.
+    tf32: false # Zweck: TF32 deaktiviert. Auswirkung: konsistenteres Verhalten über Hardwareklassen hinweg.
 
-  gradient_checkpointing: true
-  optim: "adamw_torch"
-  dataloader_num_workers: 0
+    gradient_checkpointing: true # Zweck: Speicher sparen durch Recompute. Auswirkung: deutlich weniger VRAM, dafür längere Schrittzeiten.
+    optim: "adamw_torch" # Zweck: stabiler Standard-Optimizer für Transformer-Finetuning. Auswirkung: gut reproduzierbares Verhalten.
+    dataloader_num_workers: 0 # Zweck: keine parallelen Loader-Worker. Auswirkung: minimiert CPU/RAM-Spitzen und Debug-Komplexität.
 
-  logging_steps: 1
-  save_steps: 5
-  save_total_limit: 1
-  evaluation_strategy: "no"
+    logging_steps: 1 # Zweck: bei jedem Schritt loggen. Auswirkung: maximale Sichtbarkeit im Smoke, etwas mehr I/O.
+    save_steps: 5 # Zweck: Speichern am Laufende (bei max_steps=5). Auswirkung: sicherer Artefaktnachweis.
+    save_total_limit: 1 # Zweck: nur ein Checkpoint behalten. Auswirkung: minimaler Speicherverbrauch.
+    evaluation_strategy: "no" # Zweck: keine Zwischen-Eval im Smoke-Training. Auswirkung: schnellerer Testlauf, Qualität wird separat evaluiert.
 
-  group_by_length: false
-  remove_unused_columns: false
-  report_to:
-    - "tensorboard"
+    group_by_length: false # Zweck: kein Längengruppieren im Smoke. Auswirkung: einfacheres, robusteres Verhalten bei Mini-Datasets.
+    remove_unused_columns: false # Zweck: keine aggressive Spaltenbereinigung. Auswirkung: reduziert Risiko versehentlichen Feldverlusts.
+    report_to:
+        - "tensorboard" # Zweck: Trainingsmetriken an TensorBoard senden. Auswirkung: schnelle visuelle Debug-Möglichkeit.
 
 notes:
-  - "Use only for smoke verification, not quality training."
-  - "If OOM still occurs, reduce max_seq_length to 128."
+    - "Nur für Smoke-Verifikation, nicht für Qualitätsaussagen verwenden." # Zweck: klare Betriebsgrenze. Auswirkung: verhindert Fehlinterpretation der Ergebnisse.
+    - "Wenn trotzdem OOM auftritt, zuerst max_seq_length auf 128 senken." # Zweck: priorisierte Notfallmaßnahme. Auswirkung: höchste Wahrscheinlichkeit für Stabilisierung.

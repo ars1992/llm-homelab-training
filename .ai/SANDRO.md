@@ -260,16 +260,21 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - Runbook-Samples werden als aktiver Hebel zur Gate-Verbesserung geführt, bevor größere Architekturerweiterungen (z. B. SEAL-Loop) priorisiert werden.
   - Permission-Fix Entscheidung für Datenartefakte dokumentiert:
     - Ursache bestätigt: root-owned Artefakte unter `data/*` durch Containerprozesse ohne Host-UID/GID-Mapping.
+    - Zusätzliche Root-Cause-Klasse bestätigt:
+      - `PermissionError` im Training bei Hugging-Face-Cache unter `/workspace/.cache/huggingface/...`, wenn der Pfad nicht korrekt als Host-Bind-Mount verfügbar ist.
     - Umgesetzte Prävention:
       - `docker/compose.yaml` (`trainer`) nutzt `user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"`.
+      - `docker/compose.yaml` mountet zusätzlich `../.cache:/workspace/.cache`.
       - `.env.example` enthält `USERMAP_UID` und `USERMAP_GID` als konfigurierbare Betriebsparameter.
+      - `ensure-data-dirs` erzeugt `.cache` inkl. Hugging-Face-Unterpfaden deterministisch.
     - Betriebsregel:
       - Host-UID/GID vor Inbetriebnahme mit `id -u` / `id -g` prüfen und in `.env` setzen.
-      - Nach der Umstellung Container neu erstellen (`down` + `up -d --build`), damit das Mapping wirksam ist.
+      - Nach Mapping-/Mount-Änderungen Container neu erstellen (`down` + `up -d --build`), damit User- und Cache-Pfade wirksam sind.
     - Recovery für Altartefakte:
       - Einmaliger Ownership-Fix per `chown -R <user>:<group>` auf betroffenen `data/`-Unterpfaden.
+      - Bei Cache-Problemen zusätzlich Ownership auf `.cache/` korrigieren.
     - Erwarteter Nutzen:
-      - `retention-clean` und Folgeprozesse laufen ohne manuelle Rechtekorrektur.
+      - `retention-clean`, `real-run-*` und Hugging-Face-Downloads laufen ohne manuelle Rechtekorrektur stabil.
   - Zed-Task-Memory ergänzt:
     - Task-Dokument angelegt: `.ai/TASK-ZED-0001-Fix-Permissions-Data-Mount.md`.
     - Inhalt: Zielbild, Scope, technische Änderungen, Akzeptanzkriterien, Testplan, Recovery, Risiken und Audit-Hinweise.

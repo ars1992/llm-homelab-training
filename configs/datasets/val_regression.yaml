@@ -1,52 +1,81 @@
+# val_regression.yaml
+#
+# Zweck:
+# - Konfiguration für den deterministischen Regression-Eval auf data/datasets/val.jsonl
+# - Schwerpunkt auf nachvollziehbaren Gates für:
+#   1) exact_openbook (exakte Treffer)
+#   2) runbook_openbook (inhaltliche Abdeckung über expected_contains)
+#
+# Wirkung auf Gates (wichtig):
+# - exact-Gate wird primär durch:
+#   - evaluation.exact.* (Normalisierung/Striktheit)
+#   - evaluation.max_new_tokens (Antwortlänge/Loop-Risiko)
+#   - Prompt-/Modellverhalten (indirekt)
+# - runbook-Gate wird primär durch:
+#   - evaluation.runbook.pass_threshold
+#   - non_exact-Normalisierung (Substring-Toleranz)
+#   - Qualität/Abdeckung der erwarteten Tokens im Modelloutput
+#
+# Hinweis:
+# - Diese Datei steuert die Auswertung, nicht das Training direkt.
+# - Änderungen hier können die gemessene Passrate deutlich beeinflussen.
+
 name: val_regression
-description: Committed regression validation set for deterministic substring checks with diagnostics and partial credit.
+description: >
+    Committed Regression Validation Set für deterministische expected_contains-Prüfung
+    mit Diagnostics und Teilbewertung für Runbook-Cases.
 
 dataset:
-    path: data/datasets/val.jsonl
-    format: jsonl
-    id_field: id
-    instruction_field: instruction
-    input_field: input
-    expected_contains_field: expected_contains
-    tags_field: tags
+    path: data/datasets/val.jsonl # Zweck: Quelle der Val-Fälle. Wirkung: definiert vollständig, was gemessen wird.
+    format: jsonl # Zweck: Eingabeformat-Contract. Wirkung: falsches Format führt zu Parse-Fehlern.
+    id_field: id # Zweck: eindeutige Fall-ID pro Zeile. Wirkung: wichtig für Tracebarkeit pro Testfall.
+    instruction_field: instruction # Zweck: Feldmapping für Aufgabenstellung. Wirkung: falsches Mapping verfälscht Prompt.
+    input_field: input # Zweck: Feldmapping für Zusatzkontext. Wirkung: beeinflusst Modellantwort und Tokenabdeckung.
+    expected_contains_field: expected_contains # Zweck: Soll-Tokens/Substrings für Bewertung. Wirkung: Kern der Pass/Fail-Entscheidung.
+    tags_field: tags # Zweck: Fallklassifikation (exact/runbook/openbook/closedbook). Wirkung: steuert Evaluationslogik pro Falltyp.
 
 determinism:
-    seed: 42
-    shuffle: false
-    max_samples: 0 # 0 = use full dataset
+    seed: 42 # Zweck: Best-Effort-Reproduzierbarkeit. Wirkung: reduziert Drift bei nichtdeterministischen Komponenten.
+    shuffle: false # Zweck: feste Fallreihenfolge. Wirkung: stabile Vergleichbarkeit zwischen Läufen.
+    max_samples: 0 # 0 = alle Fälle verwenden. Wirkung: >0 beschleunigt Tests, reduziert aber Aussagekraft.
 
 evaluation:
-    batch_size: 1
-    max_new_tokens: 512
-    temperature: 0.0
-    top_p: 1.0
-    do_sample: false
+    # Generationsparameter (wirken auf Output-Form und damit auf Gates)
+    batch_size: 1 # Zweck: konservative Inferenzlast. Wirkung: stabiler auf knapper VRAM/GPU, langsamer.
+    max_new_tokens: 512 # Zweck: maximale Antwortlänge. Wirkung: zu hoch kann Loops/Wrappers fördern; zu niedrig kann Inhalte abschneiden.
+    temperature: 0.0 # Zweck: deterministisches Decoding. Wirkung: bessere Reproduzierbarkeit für Gate-Vergleiche.
+    top_p: 1.0 # Zweck: Nucleus-Sampling-Grenze. Wirkung: bei do_sample=false praktisch neutral.
+    do_sample: false # Zweck: Sampling aus. Wirkung: stabile, besser vergleichbare Runs.
 
-    # Legacy-compatible defaults
-    case_sensitive: false
-    trim_whitespace: true
+    # Legacy-defaults für non-exact Pfad (falls nicht tiefer überschrieben)
+    case_sensitive: false # Zweck: globale Standardsensitivität. Wirkung: weniger strikte Vergleiche.
+    trim_whitespace: true # Zweck: Whitespace-Normalisierung. Wirkung: toleranter gegen reine Formatabweichungen.
 
-    # Exact cases stay strict, but tolerate common output wrappers
+    # EXACT-Cases:
+    # Ziel: exakte Werte robust erkennen, trotz Wrapper-/Prompt-Leakage.
     exact:
-        case_sensitive: true
-        trim_whitespace: true
-        strip_wrappers: true
-        first_line_only: true
+        case_sensitive: true # Wirkung auf exact_gate: strikter Vergleich (Groß-/Kleinschreibung muss stimmen).
+        trim_whitespace: true # Wirkung auf exact_gate: toleriert äußere Leerzeichen/Mehrspaces.
+        strip_wrappers: true # Wirkung auf exact_gate: entfernt bekannte Wrapper (Kontext/Antwort/Instruction etc.).
+        first_line_only: true # Wirkung auf exact_gate: bewertet primär erste relevante Zeile (Anti-Looping).
 
-    # Non-exact cases (especially runbook) may normalize more aggressively
+    # NON-EXACT-Cases (u. a. runbook):
+    # Ziel: erwartete Substrings im Text finden (Coverage-basiert).
     non_exact:
-        case_sensitive: false
-        trim_whitespace: true
-        strip_wrappers: true
+        case_sensitive: false # Wirkung auf runbook_gate: toleranter gegenüber Groß-/Kleinschreibung.
+        trim_whitespace: true # Wirkung auf runbook_gate: reduziert Fehlfails durch Formatrauschen.
+        strip_wrappers: true # Wirkung auf runbook_gate: ignoriert Prompt-/Template-Artefakte.
 
-    # Runbook/openbook partial credit
+    # RUNBOOK-Teilbewertung:
+    # pass = coverage >= pass_threshold
+    # coverage = hits / total_expected
     runbook:
-        pass_threshold: 0.6
+        pass_threshold: 0.6 # Wirkung auf runbook_gate: höher = strenger (mehr erwartete Tokens nötig), niedriger = toleranter.
 
-    # Per-item diagnostics
+    # Debug-/Diagnoseausgabe
     debug:
-        output_preview_chars: 200
+        output_preview_chars: 200 # Zweck: kurze Vorschau im Report. Wirkung: bessere Forensik bei Fail-Cases.
 
 outputs:
-    root_dir: data/evals
-    report_filename: val_report.json
+    root_dir: data/evals # Zweck: Zielordner für Eval-Artefakte.
+    report_filename: val_report.json # Zweck: Name des Hauptreports pro Eval-Run.

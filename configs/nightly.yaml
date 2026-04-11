@@ -1,0 +1,41 @@
+# Zentrale Nightly-Konfiguration fuer llm-homelab-training
+# Zweck: alle Nightly-relevanten Schwellwerte/Parameter aus dem Makefile herausziehen.
+
+promotion:
+  # Mindest-Sollwert fuer exact_openbook pass rate.
+  pass_rate_exact_openbook_min: 0.60
+
+  # Mindest-Sollwert fuer runbook_openbook durchschnittliche Coverage.
+  avg_coverage_runbook_openbook_min: 0.30
+
+nightly:
+  # Optionales CPU-Limit fuer Nightly-Lauf (0=aus, 1=an).
+  apply_cpu_limit: 0
+
+retention:
+  # Anzahl Run-Ordner, die mindestens behalten werden.
+  keep: 3
+
+swap_gate:
+  # Mindestwert fuer SwapFree in kB vor schweren Schritten.
+  swapfree_min_kb: 524288
+
+  # Mindestwert fuer MemAvailable in kB vor schweren Schritten.
+  mem_min_kb: 2000000
+
+self_edits:
+  # Aktiviert Merge der self-edit exports in prepare-dataset-augmented (0=aus, 1=an).
+  merge_enable: 1
+
+  # Obergrenze der self-edit Samples pro Mergelauf.
+  merge_cap: 200
+
+  # Parameter fuer make self-edits-generate.
+  max_sources: 50
+  candidates_per_source: 1
+  seed: 1337
+
+runbook:
+  # Parameter fuer make runbook-samples-generate.
+  variants_per_case: 25
+  seed: 1337

@@ -111,6 +111,9 @@ Wichtige lokale Overrides:
 - **UID/GID-Mapping gegen root-owned Artefakte**:
   - `USERMAP_UID` und `USERMAP_GID`
   - Werte auf Host prüfen mit `id -u` und `id -g`
+- **Trainer-Cache-Bind-Mount muss aktiv sein**:
+  - `docker/compose.yaml` mountet `../.cache:/workspace/.cache`
+  - verhindert `PermissionError` beim Schreiben von Hugging-Face-Artefakten unter `/workspace/.cache/huggingface/...`
 
 ### 3) Container bauen und starten
 
@@ -374,6 +377,9 @@ Um root-owned Artefakte unter `data/` zu vermeiden, läuft der Trainer-Container
 
 - Compose: `user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"`
 - `.env`: `USERMAP_UID`, `USERMAP_GID` korrekt auf Host setzen (`id -u`, `id -g`)
+- Zusätzlich muss der HF-Cache hostseitig gemountet sein:
+  - `../.cache:/workspace/.cache`
+  - sonst kann es bei Modell-/Tokenizer-Downloads zu `PermissionError` unter `/workspace/.cache/huggingface/...` kommen
 - Nach Änderung immer neu erstellen:
   - `docker compose -f docker/compose.yaml down`
   - `docker compose -f docker/compose.yaml up -d --build`

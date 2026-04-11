@@ -17,6 +17,10 @@ COMPOSE_FILE := docker/compose.yaml
 COMPOSE := docker compose -f $(COMPOSE_FILE)
 SERVICE := trainer
 BASE_MODEL := facebook/opt-2.7b
+NIGHTLY_CONFIG := configs/nightly.yaml
+# Hilfsfunktion: liest einen Wert aus NIGHTLY_CONFIG via scripts/cfg.py
+# Verwendung: $(call cfg,dotted.key)
+cfg = $(shell python3 scripts/cfg.py $(NIGHTLY_CONFIG) $(1))
 
 SMOKE_DATASET := data/datasets/smoke_train.jsonl
 SMOKE_STATE_DIR := data/runs/smoke
@@ -34,8 +38,8 @@ LATEST_PROMOTION_SUMMARY_FILE := $(RUN_STATE_DIR)/LATEST_PROMOTION_SUMMARY.json
 VAL_REG_CONFIG := configs/datasets/val_regression.yaml
 VAL_REG_DATASET := data/datasets/val.jsonl
 VAL_REG_OUTPUT_ROOT := data/evals
-PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK ?= 0.60
-PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK ?= 0.30
+PROMOTE_MIN_PASS_RATE_EXACT_OPENBOOK := $(call cfg,promotion.pass_rate_exact_openbook_min)
+PROMOTE_MIN_AVG_COVERAGE_RUNBOOK_OPENBOOK := $(call cfg,promotion.avg_coverage_runbook_openbook_min)
 SERVE_COMPOSE_FILE := docker/compose.serve.yaml
 SERVE_COMPOSE := docker compose -f $(SERVE_COMPOSE_FILE)
 SERVE_PORT ?= 8901
@@ -47,8 +51,8 @@ VAULT_DOCS_ROOT := /vault/15_Dokumentation
 VAULT_PREPARE_OUTPUT := data/datasets/train.jsonl
 VAULT_PREPARE_REPORT := data/datasets/prepare_report.json
 
-RETENTION_KEEP ?= 3
-NIGHTLY_APPLY_CPU_LIMIT ?= 0
+RETENTION_KEEP := $(call cfg,retention.keep)
+NIGHTLY_APPLY_CPU_LIMIT := $(call cfg,nightly.apply_cpu_limit)
 
 # Supplemental dataset paths (augmentation for C1/C3)
 EXACT_EXTRACTION_VAULT := /vault/exact_extraction
@@ -60,17 +64,17 @@ VAL_VALIDATE_REPORT := data/datasets/val_validate_report.json
 
 SELF_EDITS_RUNS_ROOT := data/self_edits/runs
 SELF_EDITS_EXPORT_ACCEPTED := data/training/derived/self_edits.accepted.jsonl
-SELF_EDITS_MAX_SOURCES ?= 50
-SELF_EDITS_CANDIDATES_PER_SOURCE ?= 1
-SELF_EDITS_SEED ?= 1337
+SELF_EDITS_MAX_SOURCES := $(call cfg,self_edits.max_sources)
+SELF_EDITS_CANDIDATES_PER_SOURCE := $(call cfg,self_edits.candidates_per_source)
+SELF_EDITS_SEED := $(call cfg,self_edits.seed)
 SELF_EDITS_VALIDATE_RUN_ID ?=
-SELF_EDITS_MERGE_ENABLE ?= 1
-SELF_EDITS_MERGE_CAP ?= 200
+SELF_EDITS_MERGE_ENABLE := $(call cfg,self_edits.merge_enable)
+SELF_EDITS_MERGE_CAP := $(call cfg,self_edits.merge_cap)
 SELF_EDITS_MERGE_CAPPED := data/training/derived/self_edits.accepted.capped.jsonl
 
 RUN_LOCK_FILE := $(RUN_STATE_DIR)/LOCK
-SWAP_GATE_SWAPFREE_MIN_KB ?= 524288
-SWAP_GATE_MEM_MIN_KB ?= 2000000
+SWAP_GATE_SWAPFREE_MIN_KB := $(call cfg,swap_gate.swapfree_min_kb)
+SWAP_GATE_MEM_MIN_KB := $(call cfg,swap_gate.mem_min_kb)
 
 .PHONY: help \
 	preflight check-docker check-gpu-host check-gpu-container check-paths gpu-info \
@@ -154,7 +158,7 @@ check-paths:
 	@echo "OK: required project files present"
 
 ensure-data-dirs:
-	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR)
+	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR) .cache .cache/huggingface .cache/huggingface/datasets .cache/huggingface/transformers
 	@touch $(LATEST_OK_ADAPTER_ID_FILE)
 	@if [ ! -f $(LATEST_OK_ADAPTER_PATH_FILE) ]; then echo "data/models/<run-id>" > $(LATEST_OK_ADAPTER_PATH_FILE); fi
 	@echo "OK: ensured data directories"
@@ -392,8 +396,8 @@ runbook-samples-generate:
 	@python3 src/scripts/generate_runbook_samples.py \
 		--val-jsonl $(VAL_REG_DATASET) \
 		--output-jsonl $(RUNBOOK_SAMPLES) \
-		--variants-per-case 25 \
-		--seed 1337 \
+		--variants-per-case $(call cfg,runbook.variants_per_case) \
+		--seed $(call cfg,runbook.seed) \
 		--report-json $(RUNBOOK_SAMPLES_REPORT)
 
 # C1: Extract exact_extraction samples from MD triplets (## Instruction/Input/Output).
@@ -859,9 +863,10 @@ clean-smoke:
 
 clean-data:
 	@find data -mindepth 1 -maxdepth 1 ! -name README.md -exec rm -rf {} +
-	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR)
+	@mkdir -p data/datasets data/models data/logs data/evals $(SMOKE_STATE_DIR) $(RUN_STATE_DIR) .cache .cache/huggingface .cache/huggingface/datasets .cache/huggingface/transformers
 	@touch $(LATEST_OK_ADAPTER_ID_FILE)
 	@echo "data/models/<run-id>" > $(LATEST_OK_ADAPTER_PATH_FILE)
+	@echo "OK: data artifacts removed and runtime pointers reset"
 	@rm -f $(LATEST_REALRUN_ID_FILE) $(RUN_STATE_DIR)/LATEST_EVAL_RUN_ID $(LATEST_PROMOTION_SUMMARY_FILE) $(RUN_LOCK_FILE)
 	@echo "OK: cleaned generated data artifacts and reset runtime pointers (kept data/README.md)"
 

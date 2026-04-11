@@ -1,84 +1,90 @@
-# Evaluation configuration template (MVP)
-# Purpose:
-# - deterministic local evaluation runs
-# - compare base model vs LoRA adapter outputs
-# - write auditable artifacts to /workspace/data/evals/<run_id>/
+# Eval-Konfiguration (MVP) für llm-homelab-training
+#
+# Ziel dieses Files:
+# - deterministische, lokal reproduzierbare Evaluationsläufe
+# - vergleichbare Metriken zwischen Base-Modell und LoRA-Adapter
+# - auditierbare Artefakte unter data/evals/<run_id>/
+#
+# Kommentar-Konvention:
+# - "Zweck": Warum der Parameter existiert
+# - "Auswirkung": Was sich bei Änderung für die Auswertung praktisch verändert
 
 project:
-  name: llm-homelab-training
-  run_id: "eval-20260101T000000Z"   # override via CLI if needed
-  seed: 42
+    name: llm-homelab-training # Zweck: Projektkennung in Reports/Metadaten. Auswirkung: keine Modellwirkung, aber bessere Nachvollziehbarkeit.
+    run_id: "eval-20260101T000000Z" # Zweck: eindeutige Eval-Lauf-ID. Auswirkung: steuert Artefaktpfad/Trennung der Runs; sollte pro Lauf einzigartig sein.
+    seed: 42 # Zweck: deterministische Initialisierung (best effort). Auswirkung: reduziert Zufallsdrift bei Sampling/Token-Operationen.
 
 model:
-  base_model_name: "facebook/opt-2.7b"
-  # Optional LoRA adapter path (set empty string for base-only eval)
-  adapter_path: "/workspace/data/models/latest"
-  device: "cuda"
-  torch_dtype: "float16"            # K80-safe default (bf16 usually not supported on K80)
+    base_model_name: "facebook/opt-2.7b" # Zweck: Basis-Modellquelle. Auswirkung: bestimmt Architektur/Tokenizer und damit die gesamte Auswertung.
+    adapter_path: "/workspace/data/models/latest" # Zweck: optionaler LoRA-Adapterpfad. Auswirkung: leer/ungültig => Base-only Eval; gesetzt => Adapter-Qualität wird gemessen.
+    device: "cuda" # Zweck: Zielgerät für Inferenz. Auswirkung: cuda schneller, aber abhängig von GPU-Verfügbarkeit/VRAM; cpu robuster, aber langsam.
+    torch_dtype: "float16" # Zweck: Rechendatentyp bei Modellladung. Auswirkung: geringerer Speicherbedarf, potenziell numerische Sensitivität.
 
 dataset:
-  path: "/workspace/data/datasets/val.jsonl"
-  format: "jsonl"
-  fields:
-    instruction: "instruction"
-    input: "input"
-    output: "output"
-  max_samples: 200                  # keep low for K80 runtime; set 0 for all samples
+    path: "/workspace/data/datasets/val.jsonl" # Zweck: Evaluationsdatensatzpfad. Auswirkung: definiert vollständig, was gemessen wird.
+    format: "jsonl" # Zweck: Eingabeformat-Contract. Auswirkung: falsches Format führt zu Parse-/Ladefehlern.
+    fields:
+        instruction: "instruction" # Zweck: Mapping auf Aufgabenfeld im Datensatz. Auswirkung: falsches Mapping verfälscht Prompts/Metriken.
+        input: "input" # Zweck: Mapping auf Kontextfeld. Auswirkung: falsches Mapping verschlechtert Antwortbezug.
+        output: "output" # Zweck: Mapping auf Referenzantwort. Auswirkung: falsches Mapping macht Metriken unbrauchbar.
+    max_samples: 200 # Zweck: Begrenzung der Auswertungsmenge. Auswirkung: kleiner = schneller, aber geringere statistische Aussagekraft; 0 (falls unterstützt) = alle.
 
 prompting:
-  template: |
-    ### Instruction:
-    {instruction}
+    template: |
+        ### Instruction:
+        {instruction}
 
-    ### Input:
-    {input}
+        ### Input:
+        {input}
 
-    ### Response:
-  include_input_if_empty: false
-  max_source_chars: 8000            # guardrail against very long prompts
+        ### Response:
+    # Zweck: standardisierte Prompt-Struktur für Evaluationsinferenz.
+    # Auswirkung: beeinflusst Vergleichbarkeit stark; Template-Änderung kann Metriken deutlich verschieben.
+    include_input_if_empty: false # Zweck: leere Input-Blöcke optional ausblenden. Auswirkung: reduziert Prompt-Rauschen, kann Output-Format stabilisieren.
+    max_source_chars: 8000 # Zweck: Guardrail gegen extrem lange Quellen. Auswirkung: schützt Laufzeit/Memory; zu klein kann wichtige Infos abschneiden.
 
 inference:
-  max_new_tokens: 256
-  temperature: 0.0                  # deterministic default
-  top_p: 1.0
-  do_sample: false
-  repetition_penalty: 1.0
-  batch_size: 1                     # conservative for K80 VRAM
+    max_new_tokens: 256 # Zweck: maximale Antwortlänge. Auswirkung: zu klein => abgeschnittene Antworten; zu groß => längere Laufzeit/mehr Drift.
+    temperature: 0.0 # Zweck: Sampling-Temperatur. Auswirkung: 0.0 = deterministischer/greedy; höher = variabler, schlechter vergleichbar.
+    top_p: 1.0 # Zweck: nucleus sampling Grenze. Auswirkung: bei do_sample=false praktisch irrelevant; sonst steuert Diversität.
+    do_sample: false # Zweck: Sampling aktiv/inaktiv. Auswirkung: false für reproduzierbare Benchmarks empfohlen.
+    repetition_penalty: 1.0 # Zweck: Bestrafung von Wiederholungen. Auswirkung: >1.0 reduziert Loops, kann aber gewünschte Wiederholungen unterdrücken.
+    batch_size: 1 # Zweck: Inferenz-Batchgröße. Auswirkung: klein = stabil bei wenig VRAM; groß = schneller, aber höheres OOM-Risiko.
 
 metrics:
-  enabled:
-    - exact_match
-    - token_f1
-    - rougeL
-  normalize_text: true
-  lowercase: true
-  strip_punctuation: false
+    enabled:
+        - exact_match # Zweck: strikter Stringvergleich. Auswirkung: sehr sensibel auf Format/Interpunktion.
+        - token_f1 # Zweck: tokenbasierte Überlappung. Auswirkung: robuster als exact_match bei kleinen Formabweichungen.
+        - rougeL # Zweck: längste gemeinsame Sequenz als Ähnlichkeitsmaß. Auswirkung: gut für strukturierte Antworten, weniger strikt als exact_match.
+    normalize_text: true # Zweck: Vorverarbeitung vor Metrikberechnung. Auswirkung: erhöht Robustheit gegen triviale Formatunterschiede.
+    lowercase: true # Zweck: Kleinschreibung erzwingen. Auswirkung: reduziert Case-bedingte Fehlbewertungen.
+    strip_punctuation: false # Zweck: Satzzeichen entfernen oder behalten. Auswirkung: true macht Metriken toleranter, kann aber Präzision verwässern.
 
 outputs:
-  root_dir: "/workspace/data/evals"
-  save_predictions_jsonl: true
-  save_metrics_json: true
-  save_config_snapshot: true
-  tensorboard:
-    enabled: true
-    log_dir: "/workspace/data/logs"
+    root_dir: "/workspace/data/evals" # Zweck: Root für Eval-Artefakte. Auswirkung: bestimmt Speicherort für Reports/Predictions.
+    save_predictions_jsonl: true # Zweck: Rohvorhersagen speichern. Auswirkung: essenziell für Debug/Root-Cause-Analyse bei schlechten Metriken.
+    save_metrics_json: true # Zweck: Metrikzusammenfassung speichern. Auswirkung: notwendig für Gate-/Trend-Auswertung.
+    save_config_snapshot: true # Zweck: effektive Konfiguration persistieren. Auswirkung: erhöht Reproduzierbarkeit und Auditierbarkeit.
+    tensorboard:
+        enabled: true # Zweck: Eval-Metriken optional an TensorBoard übergeben. Auswirkung: bessere Visualisierung, minimaler Overhead.
+        log_dir: "/workspace/data/logs" # Zweck: Zielpfad für TB-Logs. Auswirkung: konsistente Ablage mit Trainingslogs.
 
 audit:
-  enabled: true
-  event_type: "evaluation_run_completed"
-  required_fields:
-    - run_id
-    - timestamp_utc
-    - base_model_name
-    - adapter_path
-    - dataset_path
-    - sample_count
-    - metrics
-    - git_commit
-  git_commit: "unknown"             # fill in via CLI wrapper/script if available
+    enabled: true # Zweck: Auditblock im Ergebnis erzwingen. Auswirkung: bessere Nachvollziehbarkeit, Pflicht für Governance.
+    event_type: "evaluation_run_completed" # Zweck: standardisierter Eventtyp. Auswirkung: erleichtert spätere Aggregation/Filterung.
+    required_fields:
+        - run_id # Zweck: eindeutige Laufidentifikation. Auswirkung: ohne Feld keine belastbare Zuordnung.
+        - timestamp_utc # Zweck: zeitliche Einordnung. Auswirkung: wichtig für Chronologie/Forensik.
+        - base_model_name # Zweck: Modellreferenz. Auswirkung: nötig für Vergleichbarkeit.
+        - adapter_path # Zweck: Adapterbezug. Auswirkung: trennt Base- und Adapter-Evals eindeutig.
+        - dataset_path # Zweck: Datensatzreferenz. Auswirkung: verhindert "stille" Datensatzdrift.
+        - sample_count # Zweck: Stichprobengröße. Auswirkung: Kontext für Metrikinterpretation.
+        - metrics # Zweck: zentrale Ergebnisdaten. Auswirkung: Kern für Gate/Entscheidung.
+        - git_commit # Zweck: Code-Stand referenzieren. Auswirkung: reproduzierbarer technischen Zustand.
+    git_commit: "unknown" # Zweck: Fallback, wenn nicht injiziert. Auswirkung: sollte per Wrapper gesetzt werden, sonst Audit-Lücke.
 
 failure_policy:
-  on_dataset_error: "fail"
-  on_model_load_error: "fail"
-  on_sample_error: "continue"       # continue and log sample-level failures
-  max_sample_errors: 20
+    on_dataset_error: "fail" # Zweck: Verhalten bei Datensatzfehlern. Auswirkung: fail stoppt Lauf sofort, verhindert stille Falschreports.
+    on_model_load_error: "fail" # Zweck: Verhalten bei Modellladefehlern. Auswirkung: fail erzwingt klare Fehlerbehebung statt Teilergebnis.
+    on_sample_error: "continue" # Zweck: Verhalten bei Einzelfall-Fehlern. Auswirkung: Lauf bleibt robust; problematische Samples werden protokolliert.
+    max_sample_errors: 20 # Zweck: Obergrenze tolerierter Samplefehler. Auswirkung: schützt vor "grünen" Läufen mit zu vielen stillen Fehlern.

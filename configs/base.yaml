@@ -1,90 +1,99 @@
-# Base training defaults for llm-homelab-training
-# This file is intentionally hardware-agnostic.
-# Override values in environment-specific configs (e.g. train_lora_3b_k80.yaml).
+# Basis-Training-Defaults für llm-homelab-training
+# Ziel:
+# - hardware-agnostischer Grundsatz
+# - reproduzierbares Verhalten als Ausgangspunkt
+# - spezifische Hardware-/Betriebsanpassungen in abgeleiteten Configs (z. B. K80)
+#
+# Hinweis zur Wirkung:
+# - "Train" = Einfluss auf Trainingsstabilität, Laufzeit, Speicherbedarf, Modellanpassung
+# - "Eval"  = Einfluss auf Vergleichbarkeit/Übertragbarkeit bei Evaluation (direkt oder indirekt)
 
 project:
-  name: llm-homelab-training
-  task: lora_finetune
-  seed: 42
+    name: llm-homelab-training # Zweck: Projektkennung für Reports/Metadaten. Train/Eval: keine Modellwirkung, aber wichtig für Auditierbarkeit.
+    task: lora_finetune # Zweck: fachliche Aufgabenklassifikation. Train: steuert ggf. Pipeline-Verzweigungen. Eval: Kontext für Auswertung.
+    seed: 42 # Zweck: deterministische Initialisierung (best effort). Train: reduziert Zufallsdrift zwischen Läufen. Eval: erhöht Vergleichbarkeit über Runs.
 
 paths:
-  train_dataset: data/datasets/train.jsonl
-  eval_dataset: data/datasets/val.jsonl
-  output_models_root: data/models
-  output_logs_root: data/logs
+    train_dataset: data/datasets/train.jsonl # Zweck: Quelle für Trainingssamples. Train: bestimmt Lerninhalt direkt. Eval: indirekt, weil Trainingsdaten die spätere Eval-Qualität beeinflussen.
+    eval_dataset: data/datasets/val.jsonl # Zweck: Referenzpfad für Evaluationsdaten. Train: keine direkte Wirkung. Eval: bestimmt Messgrundlage.
+    output_models_root: data/models # Zweck: Zielpfad für Adapter/Modelartefakte. Train: wichtig für Persistenz und Continue-Runs. Eval: Adapter-Ladepfad hängt davon ab.
+    output_logs_root: data/logs # Zweck: Zielpfad für Trainingslogs (z. B. TensorBoard). Train: Monitoring/Debug. Eval: indirekt über Nachvollziehbarkeit.
 
 model:
-  base_model_name: facebook/opt-2.7b
-  trust_remote_code: false
-  use_fast_tokenizer: true
-  torch_dtype: float16
-  attn_implementation: eager
+    base_model_name: facebook/opt-2.7b # Zweck: Basismodell-ID. Train: bestimmt Architektur, VRAM-Bedarf, Lernverhalten. Eval: gleiche Base ist Pflicht für faire Vergleiche.
+    trust_remote_code: false # Zweck: Sicherheits-/Reproduzierbarkeitsgrenze (kein fremder Runtime-Code). Train: reduziert Risiko durch dynamischen Code. Eval: gleiches Sicherheitsprofil.
+    use_fast_tokenizer: true # Zweck: schnellere Tokenisierung via fast tokenizer. Train: bessere Throughput bei Data-Prep. Eval: schnellere Inferenzvorbereitung.
+    torch_dtype: float16 # Zweck: Tensor-Datentyp. Train: weniger VRAM, evtl. numerische Instabilität vs fp32. Eval: geringerer Speicherverbrauch, ähnliche Inferenzcharakteristik.
+    attn_implementation: eager # Zweck: Attention-Implementierungsmodus. Train: stabilitätsorientiert (weniger aggressive Optimierung). Eval: konsistentes Verhalten, ggf. langsamer.
 
 data:
-  format: instruction_input_output_jsonl
-  fields:
-    instruction: instruction
-    input: input
-    output: output
-  prompt_template: |
-    ### Instruction:
-    {instruction}
+    format: instruction_input_output_jsonl # Zweck: erwartetes Datensatzschema. Train: Parser-/Template-Logik hängt davon ab. Eval: bei train/eval-Konsistenz relevant.
+    fields:
+        instruction: instruction # Zweck: Mapping auf Instruction-Feld im JSONL. Train: falsches Mapping = kaputte Prompts. Eval: indirekt über Trainingsqualität.
+        input: input # Zweck: Mapping auf optionales Kontextfeld. Train: steuert Kontextanteil im Prompt. Eval: indirekt.
+        output: output # Zweck: Mapping auf Zielantwort. Train: ist das Lernsignal. Eval: indirekt über Modellverhalten.
+    prompt_template: |
+        ### Instruction:
+        {instruction}
 
-    ### Input:
-    {input}
+        ### Input:
+        {input}
 
-    ### Response:
-  max_seq_length: 512
-  truncation: true
-  packing: false
+        ### Response:
+    # Zweck: einheitliche Prompt-Struktur beim Training.
+    # Train: stark prägend für Antwortformat, kann Template-Leakage fördern, wenn Datensatz unausgewogen ist.
+    # Eval: indirekt, weil Modell das gelernte Antwortschema in Eval reproduziert.
+    max_seq_length: 512 # Zweck: maximale Sequenzlänge in Tokens. Train: größter VRAM-/Swap-Hebel; höher = mehr Kontext, aber höheres OOM-Risiko. Eval: indirekt über gelerntes Kontextfenster.
+    truncation: true # Zweck: überlange Samples werden abgeschnitten. Train: schützt vor OOM, kann Informationsverlust erzeugen. Eval: indirekt durch potenziell fehlende Lernteile.
+    packing: false # Zweck: kein Packing mehrerer Samples in eine Sequenz. Train: stabilere Semantik pro Sample, aber weniger Throughput. Eval: indirekt, oft robusteres Formatlernen.
 
 training:
-  run_name_prefix: lora
-  num_train_epochs: 1
-  max_steps: -1
-  per_device_train_batch_size: 1
-  per_device_eval_batch_size: 1
-  gradient_accumulation_steps: 8
-  learning_rate: 0.0002
-  weight_decay: 0.0
-  lr_scheduler_type: cosine
-  warmup_ratio: 0.03
-  max_grad_norm: 1.0
-  gradient_checkpointing: true
-  dataloader_num_workers: 2
-  logging_steps: 10
-  eval_strategy: "no"
-  save_strategy: steps
-  save_steps: 200
-  save_total_limit: 2
+    run_name_prefix: lora # Zweck: Namenspräfix für Run-Identifikation. Train/Eval: keine Modellwirkung, aber wichtig für Audit/Artefaktordnung.
+    num_train_epochs: 1 # Zweck: Anzahl kompletter Dataset-Durchläufe (wenn max_steps nicht begrenzt). Train: mehr Epochen = mehr Anpassung/Overfitting-Risiko. Eval: wirkt auf Ergebnisqualität direkt.
+    max_steps: -1 # Zweck: Step-Limit; -1 bedeutet "nicht künstlich begrenzen". Train: mit Epochen zusammen wirksam. Eval: indirekt über Trainingsdauer/-tiefe.
+    per_device_train_batch_size: 1 # Zweck: Mikro-Batch pro Gerät. Train: VRAM-Hebel; klein = stabiler auf schwacher GPU, aber langsamer. Eval: indirekt.
+    per_device_eval_batch_size: 1 # Zweck: Eval-Batch pro Gerät (falls Eval im Training aktiv). Train: beeinflusst Eval-Phasen innerhalb Training. Eval: stabil bei knapper VRAM.
+    gradient_accumulation_steps: 8 # Zweck: simuliert größere effektive Batch über mehrere Mikro-Schritte. Train: stabileres Gradientenrauschen ohne VRAM-Anstieg, aber langsamer. Eval: indirekt.
+    learning_rate: 0.0002 # Zweck: Lernrate. Train: zentral für Konvergenz/Stabilität; zu hoch = Divergenz, zu niedrig = langsamer Fortschritt. Eval: bestimmt spätere Qualität.
+    weight_decay: 0.0 # Zweck: L2-Regularisierung auf Gewichte. Train: kann Overfitting reduzieren; 0.0 = keine WD-Regularisierung. Eval: beeinflusst Generalisierung.
+    lr_scheduler_type: cosine # Zweck: Lernratenverlauf über Zeit. Train: sanfteres Auslaufen, oft stabiler Endbereich. Eval: indirekt über Endqualität.
+    warmup_ratio: 0.03 # Zweck: Anteil der Schritte mit LR-Warmup. Train: reduziert frühe Instabilität/Nan-Risiko. Eval: indirekt.
+    max_grad_norm: 1.0 # Zweck: Gradient Clipping. Train: schützt vor Gradientenexplosion. Eval: indirekt über stabilere Trainingskurve.
+    gradient_checkpointing: true # Zweck: Speicher sparen durch Recompute im Backward. Train: deutlich weniger VRAM, dafür langsamer. Eval: keine direkte Inferenzwirkung.
+    dataloader_num_workers: 2 # Zweck: parallele Datenladeprozesse. Train: höher = potenziell schneller, aber mehr CPU/RAM-Spitzen. Eval: wenn genutzt, ähnliche Trade-offs.
+    logging_steps: 10 # Zweck: Log-Frequenz. Train: Monitoring-Granularität vs Logging-Overhead. Eval: bessere Diagnose von Lernverlauf.
+    eval_strategy: "no" # Zweck: keine Zwischen-Evaluation während Training. Train: schneller/robuster auf knapper Hardware. Eval: externe Eval nach Run notwendig.
+    save_strategy: steps # Zweck: Checkpoint-Speicherstrategie. Train: Step-basiertes Speichern statt epoch-basiert. Eval: erleichtert reproduzierbare Zwischenstände.
+    save_steps: 200 # Zweck: Speicherintervall in Steps. Train: häufiger = mehr Sicherheit/mehr IO/mehr Speicherbedarf. Eval: ermöglicht Zwischenvergleich.
+    save_total_limit: 2 # Zweck: Anzahl aufbewahrter Checkpoints begrenzen. Train: schützt Speicherplatz. Eval: weniger historische Zwischenstände.
 
 precision:
-  fp16: true
-  bf16: false
-  tf32: false
+    fp16: true # Zweck: Mixed/half precision aktivieren. Train: geringerer VRAM, teils empfindlicher numerisch. Eval: schneller/leichter, wenn kompatibel.
+    bf16: false # Zweck: bfloat16 deaktiviert (auf älterer GPU oft nicht unterstützt). Train: verhindert inkompatible Moduswahl. Eval: gleiche Kompatibilitätslogik.
+    tf32: false # Zweck: TF32 deaktiviert. Train: mehr numerische Determinismusnähe, ggf. langsamer auf unterstützter Hardware. Eval: ähnliche Wirkung.
 
 lora:
-  r: 16
-  lora_alpha: 32
-  lora_dropout: 0.05
-  bias: none
-  task_type: CAUSAL_LM
-  target_modules:
-    - q_proj
-    - k_proj
-    - v_proj
-    - o_proj
-    - gate_proj
-    - up_proj
-    - down_proj
+    r: 16 # Zweck: LoRA-Rank (Adapter-Kapazität). Train: höher = mehr Ausdruckskraft, mehr Parameter/VRAM/Overfit-Risiko. Eval: kann Qualität erhöhen, wenn sauber trainiert.
+    lora_alpha: 32 # Zweck: LoRA-Skalierung. Train: beeinflusst effektive Update-Stärke der Adapter. Eval: indirekt über Lernverhalten.
+    lora_dropout: 0.05 # Zweck: Dropout auf LoRA-Pfad. Train: Regularisierung gegen Overfitting. Eval: oft robustere Generalisierung.
+    bias: none # Zweck: keine Bias-Parameter im LoRA-Training. Train: weniger trainierbare Parameter, schlanker/fokussierter. Eval: meist ausreichend für effizientes Finetuning.
+    task_type: CAUSAL_LM # Zweck: PEFT-Aufgabentyp. Train: muss zur Modellklasse passen. Eval: falscher Typ führt zu inkonsistentem Verhalten.
+    target_modules:
+        - q_proj # Zweck: Attention Query-Projektion adaptieren. Train: zentraler Qualitätshebel bei Sprachmodellen. Eval: beeinflusst Antwortpräzision/-stil.
+        - k_proj # Zweck: Attention Key-Projektion adaptieren. Train: beeinflusst Kontextadressierung. Eval: indirekt auf Kohärenz.
+        - v_proj # Zweck: Attention Value-Projektion adaptieren. Train: beeinflusst Informationsinhalt im Attention-Output. Eval: indirekt.
+        - o_proj # Zweck: Attention Output-Projektion adaptieren. Train: beeinflusst aggregierte Repräsentation. Eval: indirekt.
+        - gate_proj # Zweck: MLP/Gating-Anteil adaptieren (modellabhängig). Train: erweitert Anpassung außerhalb reiner Attention. Eval: kann Fachverhalten verbessern.
+        - up_proj # Zweck: MLP-Up-Projektion adaptieren. Train: erhöht Ausdrucksfähigkeit im Feedforward-Teil. Eval: indirekt.
+        - down_proj # Zweck: MLP-Down-Projektion adaptieren. Train: komplettiert MLP-LoRA-Pfad. Eval: indirekt.
 
 optimizer:
-  type: adamw_torch
-  betas: [0.9, 0.999]
-  eps: 0.00000001
+    type: adamw_torch # Zweck: Optimizer-Typ. Train: Standard für Transformer-Finetuning, stabil und erprobt. Eval: indirekt über Trainingsqualität.
+    betas: [0.9, 0.999] # Zweck: Momentum-Parameter für AdamW. Train: Glättung der Gradientenhistorie. Eval: indirekt.
+    eps: 0.00000001 # Zweck: numerische Stabilität im Optimizer. Train: vermeidet Division-by-zero-artige Instabilitäten. Eval: indirekt.
 
 logging:
-  report_to:
-    - tensorboard
-  tensorboard:
-    enabled: true
+    report_to:
+        - tensorboard # Zweck: Logging-Backend(s). Train: ermöglicht Metrikbeobachtung/Debug. Eval: Verlaufsauswertung und Audit.
+    tensorboard:
+        enabled: true # Zweck: TensorBoard-Ausgabe aktiv. Train: Monitoring verfügbar. Eval: unterstützt Vergleich/Diagnose nach dem Lauf.

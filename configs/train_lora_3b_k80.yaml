@@ -1,29 +1,33 @@
-# K80-optimized LoRA config for a ~3B causal LM.
-# Focus: stability and reproducibility over speed.
+# Haupt-Trainingskonfiguration für LoRA auf K80 (ca. 3B Modellklasse)
+#
+# Ziel:
+# - stabiler, reproduzierbarer Real-Run auf begrenzter Legacy-Hardware
+# - klare Priorisierung: Stabilität und Auditierbarkeit vor maximalem Durchsatz
+#
+# Kommentarlogik:
+# - "Zweck": Warum der Parameter existiert
+# - "Auswirkung": Was eine Änderung typischerweise auf Train/Eval bewirkt
 
 run:
-    # run_id can be overridden by CLI; if empty, script can auto-generate one.
-    run_id: ""
-    run_id_prefix: "lora-3b-k80"
-    seed: 42
+    run_id: "" # Zweck: optional explizite Run-ID. Auswirkung: gesetzt = exakt referenzierbarer Lauf; leer = automatische ID-Generierung.
+    run_id_prefix: "lora-3b-k80" # Zweck: Präfix für automatisch erzeugte IDs. Auswirkung: erleichtert Filterung/Retention/Audit.
+    seed: 42 # Zweck: deterministische Initialisierung (best effort). Auswirkung: reduziert Zufallsdrift zwischen Läufen.
 
 paths:
-    # Can be overridden by CLI argument --dataset
-    dataset_jsonl: "data/datasets/train.jsonl"
-    model_output_root: "data/models"
-    log_output_root: "data/logs"
+    dataset_jsonl: "data/datasets/train.jsonl" # Zweck: Trainingsdatensatzpfad. Auswirkung: bestimmt direkt, was das Modell lernt.
+    model_output_root: "data/models" # Zweck: Zielordner für Adapter/Artefakte. Auswirkung: wichtig für Continue-Runs und Promotion.
+    log_output_root: "data/logs" # Zweck: Zielordner für Logs (z. B. TensorBoard). Auswirkung: ermöglicht Verlaufsanalyse/Fehlerdiagnose.
 
 model:
-    # Replace with your chosen base model (must be accessible locally or via Hugging Face).
-    # Example alternatives: "facebook/opt-2.7b", "EleutherAI/pythia-2.8b"
-    base_model_name: "facebook/opt-2.7b"
-    trust_remote_code: false
-    use_fast_tokenizer: true
+    base_model_name: "facebook/opt-2.7b" # Zweck: Basismodell-ID. Auswirkung: beeinflusst VRAM-Bedarf, Tokenizer, Lernverhalten und Vergleichbarkeit.
+    trust_remote_code: false # Zweck: Sicherheits-/Reproduzierbarkeitsgrenze (kein fremder Runtime-Code). Auswirkung: reduziert Risiko, kann exotische Modelle einschränken.
+    use_fast_tokenizer: true # Zweck: schnellere Tokenisierung. Auswirkung: kürzere Datenvorbereitung, besonders bei großen Datensätzen.
 
 data:
-    # Expected JSONL format per line:
+    # Erwartetes JSONL-Format pro Zeile:
     # {"instruction":"...", "input":"...", "output":"..."}
-    format: "instruction_input_output_jsonl"
+    format: "instruction_input_output_jsonl" # Zweck: Schema-Contract. Auswirkung: falsches Format führt zu Parse-/Mapping-Fehlern.
+
     text_template_with_input: |
         ### Instruction:
         {instruction}
@@ -33,82 +37,74 @@ data:
 
         ### Response:
         {output}
+    # Zweck: Trainingsprompt mit zusätzlichem Kontext.
+    # Auswirkung: prägt das spätere Antwortformat; kann bei schlechtem Datensatz Template-Leakage fördern.
+
     text_template_no_input: |
         ### Instruction:
         {instruction}
 
         ### Response:
         {output}
+    # Zweck: Trainingsprompt ohne Kontextblock.
+    # Auswirkung: vermeidet unnötigen Prompt-Rauschen bei leeren Inputs.
 
-    # Swap-thrash mitigation (primary lever):
-    # 512 -> 384 for lower memory pressure.
-    # If host still swaps heavily, reduce to 256.
-    max_seq_length: 384
-    truncation: true
-    packing: false
+    max_seq_length: 384 # Zweck: maximale Tokenlänge pro Beispiel. Auswirkung: größter VRAM-/Swap-Hebel; höher = mehr Kontext, aber höheres OOM-Risiko.
+    truncation: true # Zweck: zu lange Sequenzen abschneiden. Auswirkung: schützt vor OOM, kann inhaltliche Informationen verlieren.
+    packing: false # Zweck: kein Packing mehrerer Samples in eine Sequenz. Auswirkung: stabileres Lernsignal pro Sample, aber geringerer Throughput.
 
-    # Lower tokenization parallelism to reduce host RAM peaks.
-    num_proc: 1
+    num_proc: 1 # Zweck: parallele Prozesse bei Datenvorbereitung begrenzen. Auswirkung: reduziert Host-RAM-Spitzen und Swap-Druck.
 
 lora:
-    task_type: "CAUSAL_LM"
-    r: 8
-    alpha: 16
-    dropout: 0.05
-    bias: "none"
-    # For OPT-like/LLaMA-like models these are common defaults.
-    # If your model uses different module names, adjust here.
+    task_type: "CAUSAL_LM" # Zweck: PEFT-Aufgabentyp passend für autoregressive LMs. Auswirkung: falscher Typ kann Training/Eval inkonsistent machen.
+    r: 8 # Zweck: LoRA-Rank (Adapterkapazität). Auswirkung: höher = mehr Anpassungsfähigkeit, aber mehr Speicher/Overfit-Risiko.
+    alpha: 16 # Zweck: LoRA-Skalierung. Auswirkung: steuert effektive Stärke der Adapter-Updates.
+    dropout: 0.05 # Zweck: Regularisierung im LoRA-Pfad. Auswirkung: kann Overfitting reduzieren, leicht langsamer.
+    bias: "none" # Zweck: Bias-Parameter nicht mittrainieren. Auswirkung: weniger trainierbare Parameter, meist stabiler auf K80.
     target_modules:
-        - "q_proj"
-        - "k_proj"
-        - "v_proj"
-        - "o_proj"
+        - "q_proj" # Zweck: Attention Query-Projektion anpassen. Auswirkung: zentral für Kontextfokus/Antwortverhalten.
+        - "k_proj" # Zweck: Attention Key-Projektion anpassen. Auswirkung: beeinflusst Kontextadressierung.
+        - "v_proj" # Zweck: Attention Value-Projektion anpassen. Auswirkung: beeinflusst eingebrachten Informationsinhalt.
+        - "o_proj" # Zweck: Attention Output-Projektion anpassen. Auswirkung: beeinflusst aggregierte Attention-Ausgabe.
 
 training:
-    # K80-safe defaults (12GB VRAM per GPU, older architecture).
-    num_train_epochs: 3
-    max_steps: -1
+    num_train_epochs: 3 # Zweck: Anzahl Datensatzdurchläufe (falls max_steps nicht begrenzt). Auswirkung: mehr Epochen = mehr Anpassung, höheres Overfit-Risiko.
+    max_steps: -1 # Zweck: Step-Limit deaktivieren (-1). Auswirkung: Laufdauer primär epochen-/datensatzgetrieben.
 
-    per_device_train_batch_size: 1
+    per_device_train_batch_size: 1 # Zweck: Mikro-Batch pro Gerät. Auswirkung: minimiert VRAM-Bedarf, senkt Durchsatz.
+    gradient_accumulation_steps: 24 # Zweck: effektive Batchgröße per Akkumulation erhöhen. Auswirkung: stabileres Gradientenrauschen bei kleiner Mikro-Batch, aber langsamer.
 
-    # Keep an effective batch signal while using shorter sequences.
-    # (Throughput may decrease, but VRAM should stay stable.)
-    gradient_accumulation_steps: 24
+    learning_rate: 0.0002 # Zweck: Lernrate. Auswirkung: zu hoch = instabil/divergent, zu niedrig = langsamer Lernfortschritt.
+    lr_scheduler_type: "cosine" # Zweck: Lernratenverlauf über den Lauf. Auswirkung: sanfter Endverlauf, oft stabilere Konvergenz.
+    warmup_ratio: 0.03 # Zweck: Anteil Warmup-Schritte. Auswirkung: reduziert frühe Instabilität/Nan-Risiko.
+    weight_decay: 0.0 # Zweck: L2-Regularisierung. Auswirkung: 0.0 = keine zusätzliche WD-Regularisierung.
+    max_grad_norm: 1.0 # Zweck: Gradient Clipping. Auswirkung: schützt vor Gradientenexplosion.
 
-    learning_rate: 0.0002
-    lr_scheduler_type: "cosine"
-    warmup_ratio: 0.03
-    weight_decay: 0.0
-    max_grad_norm: 1.0
+    fp16: true # Zweck: Half Precision aktivieren. Auswirkung: deutlich weniger VRAM, ggf. sensibler numerisch.
+    bf16: false # Zweck: bfloat16 deaktivieren (K80 meist inkompatibel). Auswirkung: verhindert Laufzeit-/Kompatibilitätsfehler.
+    tf32: false # Zweck: TF32 deaktivieren. Auswirkung: konsistenteres Verhalten über Hardware, ggf. geringere Geschwindigkeit.
 
-    # K80 typically supports fp16 but not bf16.
-    fp16: true
-    bf16: false
-    tf32: false
+    gradient_checkpointing: true # Zweck: Speicher sparen durch Recompute. Auswirkung: deutlich weniger VRAM, dafür längere Trainingszeit.
+    optim: "adamw_torch" # Zweck: stabiler Standard-Optimizer für Transformer-Finetuning. Auswirkung: reproduzierbar und robust.
+    dataloader_num_workers: 1 # Zweck: Loader-Parallelität begrenzen. Auswirkung: weniger CPU/RAM-Peaks, leicht geringerer I/O-Durchsatz.
 
-    gradient_checkpointing: true
-    optim: "adamw_torch"
-    dataloader_num_workers: 1
+    logging_steps: 10 # Zweck: Log-Intervall. Auswirkung: engere Beobachtung vs. etwas mehr Logging-Overhead.
+    save_steps: 200 # Zweck: Checkpoint-Intervall in Schritten. Auswirkung: häufiger sichern = mehr I/O/Platz, aber bessere Recovery.
+    save_total_limit: 2 # Zweck: maximale Anzahl gespeicherter Checkpoints. Auswirkung: begrenzt Plattenverbrauch.
 
-    # Logging / saving
-    logging_steps: 10
-    save_steps: 200
-    save_total_limit: 2
-    evaluation_strategy: "no"
+    evaluation_strategy: "no" # Zweck: keine Zwischen-Eval im Training. Auswirkung: stabiler/schneller Lauf auf K80; Eval erfolgt separat via eval/eval-val.
 
-    # Repro / determinism controls (best effort on GPU workloads)
-    group_by_length: true
-    remove_unused_columns: false
+    group_by_length: true # Zweck: ähnliche Sequenzlängen gruppieren. Auswirkung: effizientere Batches, potenziell stabilerer Durchsatz.
+    remove_unused_columns: false # Zweck: keine aggressive Spaltenbereinigung. Auswirkung: reduziert Risiko, benötigte Felder zu verlieren.
     report_to:
-        - "tensorboard"
+        - "tensorboard" # Zweck: Logging-Backend. Auswirkung: Metrikverlauf visuell nachvollziehbar.
 
 hardware:
-    # Informational fields; script may ignore.
-    expected_gpu: "NVIDIA Tesla K80"
-    cuda_visible_devices: "0"
-    nvidia_visible_devices: "all"
+    expected_gpu: "NVIDIA Tesla K80" # Zweck: dokumentarische Soll-Hardware. Auswirkung: Audit-/Plausibilitätscheck.
+    cuda_visible_devices: "0" # Zweck: primär verwendete GPU-ID im Containerkontext. Auswirkung: steuert Device-Auswahl.
+    nvidia_visible_devices: "all" # Zweck: sichtbare NVIDIA-Geräte. Auswirkung: "all" für flexible Laufumgebung, bei Bedarf einschränkbar.
 
 notes:
-    - "Swap-thrash mitigation order: reduce max_seq_length first (384, then 256 if needed)."
-    - "If loss is unstable, lower learning_rate to 1e-4."
-    - "If throughput is too low, optimize only after stability is proven."
+    - "Swap-Thrash-Mitigation Reihenfolge: zuerst max_seq_length reduzieren (384 -> 256), erst danach weitere Hebel." # Auswirkung: höchste Stabilitätswirkung bei wenig VRAM.
+    - "Bei instabilem Loss zuerst learning_rate auf 1e-4 senken." # Auswirkung: oft bessere numerische Stabilität.
+    - "Durchsatzoptimierung erst nach stabilen, reproduzierbaren Läufen." # Auswirkung: reduziert Fehlersuche durch zu frühes Tuning.
