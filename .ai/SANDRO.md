@@ -299,6 +299,28 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - Run `self-edit-20260411T102943Z` wurde erfolgreich generiert und validiert (`result=ok`).
     - Betriebsprinzip bestätigt:
       - Self-Edit-Derived-Daten bleiben strikt getrennt von Source-Daten und werden nur über den dedizierten Exportpfad weiterverwendet.
+  - Dokumentationssynchronisation (README/docs/.ai) abgeschlossen:
+    - Alle zentralen Betriebsdokumente wurden auf den aktuellen Implementierungsstand harmonisiert.
+    - Aktualisiert wurden insbesondere:
+      - `README.md`
+      - `data/README.md`
+      - `data/datasets/README.md`
+      - `src/datasets/README.md`
+      - `docs/SEAL_NOTES.md`
+      - `docs/ROADMAP.md`
+      - `docs/BACKUP_POLICY.md`
+      - `.ai/CHECKLIST-SERVE-PROMOTION-MVP.md`
+      - `.ai/SEAL-PLANUNG-ELIOT-ANTWORTEN.md`
+    - Inhaltliche Schwerpunkte der Synchronisation:
+      - Serving-Hardening inkl. Degraded-Start, `serve-test` und Wrapper-Leak-Akzeptanzkriterien.
+      - Runbook-Sample-Generator inkl. deterministischer Variantenbildung und Sanity-Gates.
+      - SEAL-MVP-Status (generate/validate), Artefaktpfade und Exportlogik.
+      - Merge-Integration der Self-Edit-Exports mit Cap-/Prioritätssteuerung.
+      - UID/GID-Mapping zur Vermeidung root-owned Artefakte unter `data/`.
+    - Qualitätsnachweis:
+      - Bearbeitete Dokumente wurden auf formale Konsistenz geprüft und ohne Fehler abgeschlossen.
+    - Arbeitsprinzip bestätigt:
+      - Projektänderungen gelten erst als „fertig“, wenn Code, Betriebspfad und Dokumentation synchron sind.
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.

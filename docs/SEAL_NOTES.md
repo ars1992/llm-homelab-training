@@ -2,7 +2,7 @@
 
 ## Dokumentzweck
 
-Dieses Dokument beschreibt ein **SEAL-inspiriertes** Architektur- und Umsetzungsmodell für `llm-homelab-training`, mit Fokus auf:
+Dieses Dokument beschreibt das **SEAL-inspirierte Zielmodell** und den **aktuell implementierten MVP-Stand** in `llm-homelab-training`, mit Fokus auf:
 
 - reproduzierbare lokale Ausführung (Container-first)
 - deterministische Datenflüsse
@@ -11,6 +11,16 @@ Dieses Dokument beschreibt ein **SEAL-inspiriertes** Architektur- und Umsetzungs
 
 SEAL wird hier nicht als 1:1-Implementierung verstanden, sondern als Designprinzip:
 **Generate -> Critique -> Edit -> Verify -> Curate -> Retrain**.
+
+Aktueller Ist-Stand (implementiert):
+- deterministischer Self-Edit-Orchestrator in `src/scripts/generate_self_edits.py`
+- Modi: `placeholder`, `generate`, `validate`
+- vollständige Run-Artefakte unter `data/self_edits/runs/<run_id>/`
+- stabiler Exportpfad für akzeptierte Derived Samples:
+  - `data/training/derived/self_edits.accepted.jsonl`
+- Make-Targets:
+  - `make self-edits-generate`
+  - `make self-edits-validate`
 
 ---
 
@@ -23,6 +33,26 @@ SEAL wird hier nicht als 1:1-Implementierung verstanden, sondern als Designprinz
 5. Alle Änderungen und Datenherkünfte müssen nachvollziehbar sein.
 
 ---
+
+## Implementierter MVP-Loop (deterministisch, regelbasiert)
+
+Der derzeit produktive Self-Edit-MVP arbeitet ohne LLM-Judge und folgt dieser Reihenfolge:
+
+1. Source-Snapshot laden (`instruction`, `input`, `output`, IDs/Hashes)
+2. deterministische Kandidaten erzeugen (regelbasierte Transformationsstrategien)
+3. Kandidaten normalisieren und dedupe-sicher serialisieren
+4. regelbasierte Verifikation mit Entscheidungen:
+   - `accept`
+   - `reject`
+   - `needs_review`
+5. akzeptierte Kandidaten als `DerivedTrainingSample` exportieren
+6. Manifest und Zählwerte je Run schreiben
+7. Artefakte via `--mode validate` fail-fast validieren
+
+Umgesetzte Verifikationsklassen (MVP):
+- Pflichtfeld-/Schema-Basisprüfungen
+- No-op/Diff-Prüfung (identische Candidate-Outputs werden verworfen)
+- einfache Policy-Heuristiken (Secrets-/Hostpfad-Signale)
 
 ## Begriffsdefinitionen
 
@@ -249,19 +279,23 @@ Metrikartefakte:
 
 ---
 
-## Verzeichnislogik für Self-Edit-Artefakte (Vorschlag)
+## Verzeichnislogik für Self-Edit-Artefakte (umgesetzt)
 
-Unter `data/self_edit/`:
+Pro Self-Edit-Run wird ein vollständiger Artefaktsatz unter folgendem Pfad erzeugt:
 
-- `candidates/`
-- `critiques/`
-- `edits/`
-- `verified/`
-- `curated/`
-- `reports/`
-- `audit/`
+- `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+- `data/self_edits/runs/<run_id>/candidates.jsonl`
+- `data/self_edits/runs/<run_id>/verifications.jsonl`
+- `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+- `data/self_edits/runs/<run_id>/manifest.json`
 
-Alle Dateien tragen `run_id` im Dateinamen.
+Zusätzlicher stabiler Exportpfad für den Trainingspfad:
+
+- `data/training/derived/self_edits.accepted.jsonl`
+
+Betriebsrelevanter Pointer:
+
+- `data/runs/LATEST_SELF_EDIT_RUN_ID`
 
 ---
 
@@ -285,7 +319,28 @@ Alle Dateien tragen `run_id` im Dateinamen.
 
 ---
 
-## Offene Punkte (vor produktivem Self-Edit-Loop zu klären)
+## Make-Targets und Betriebsaufrufe (Ist-Stand)
+
+Standardaufrufe:
+
+- `make self-edits-generate`
+  - erzeugt einen neuen Run unter `data/self_edits/runs/<run_id>/`
+  - exportiert akzeptierte Derived Samples nach
+    `data/training/derived/self_edits.accepted.jsonl`
+  - führt direkt eine Validierung aus
+
+- `make self-edits-validate`
+  - validiert Artefakte eines Run-Verzeichnisses
+  - nutzt standardmäßig den letzten Run aus `LATEST_SELF_EDIT_RUN_ID`
+  - alternativ mit expliziter Run-ID über Make-Variable
+
+Direkter CLI-Aufruf (Referenz):
+
+- `python src/scripts/generate_self_edits.py --mode generate ...`
+- `python src/scripts/generate_self_edits.py --mode validate ...`
+- `python src/scripts/generate_self_edits.py --mode placeholder ...`
+
+## Offene Punkte (nach MVP)
 
 1. Welches Basismodell ist final für 3B vorgesehen?
 2. Welche harten Policy-Regeln gelten für Verifikation?

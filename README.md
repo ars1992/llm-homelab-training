@@ -21,20 +21,27 @@ Reproduzierbare lokale Container-Umgebung für LLM-Training (LoRA/Fine-Tuning) a
 ├── docker/
 │   ├── Dockerfile
 │   ├── compose.yaml
+│   ├── compose.serve.yaml
 │   └── requirements.txt
 ├── src/
 │   ├── datasets/
 │   │   ├── README.md
 │   │   └── schemas/
 │   │       └── self_edit.schema.json
-│   └── scripts/
-│       ├── prepare_dataset.py
-│       ├── generate_self_edits.py
-│       ├── train_lora.py
-│       ├── eval.py
-│       └── eval_val.py
+│   ├── scripts/
+│   │   ├── prepare_dataset.py
+│   │   ├── generate_runbook_samples.py
+│   │   ├── generate_self_edits.py
+│   │   ├── train_lora.py
+│   │   ├── eval.py
+│   │   ├── eval_val.py
+│   │   └── validate_val.py
+│   └── serve/
+│       └── app.py
 ├── scripts/
-│   └── check_gpu.sh
+│   ├── check_gpu.sh
+│   ├── run_nice.sh
+│   └── serve_smoke.sh
 ├── configs/
 │   ├── base.yaml
 │   ├── train_lora_3b_k80.yaml
@@ -46,7 +53,8 @@ Reproduzierbare lokale Container-Umgebung für LLM-Training (LoRA/Fine-Tuning) a
 ├── docs/
 │   ├── ROADMAP.md
 │   ├── SEAL_NOTES.md
-│   └── TROUBLESHOOTING_K80.md
+│   ├── TROUBLESHOOTING_K80.md
+│   └── BACKUP_POLICY.md
 ├── data/
 │   └── README.md
 └── .ai/
@@ -54,6 +62,10 @@ Reproduzierbare lokale Container-Umgebung für LLM-Training (LoRA/Fine-Tuning) a
     ├── GitGuideline.md
     ├── SyntaxGuideline.md
     ├── ADR-0001-Container-TrainingStack.md
+    ├── ADR-0002-TrainingData-In-Repo.md
+    ├── ADR-0003: SEAL-MVP (Self-Edit Loop) als deterministische, auditierbare Pipeline-Erweiterung.md
+    ├── CHECKLIST-SERVE-PROMOTION-MVP.md
+    ├── TASK-ZED-0001-Fix-Permissions-Data-Mount.md
     └── SANDRO.md
 ```
 
@@ -89,7 +101,16 @@ cd llm-homelab-training
 cp .env.example .env
 ```
 
-Danach bei Bedarf `.env` anpassen (z. B. `CUDA_VISIBLE_DEVICES`, HF Cache Pfade).
+Danach bei Bedarf `.env` anpassen.
+
+Wichtige lokale Overrides:
+
+- `CUDA_VISIBLE_DEVICES` / `NVIDIA_VISIBLE_DEVICES`
+- Cache-Pfade (`HF_HOME`, `HF_DATASETS_CACHE`, `TRANSFORMERS_CACHE`)
+- `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128` (Fragmentierungsmitigation)
+- **UID/GID-Mapping gegen root-owned Artefakte**:
+  - `USERMAP_UID` und `USERMAP_GID`
+  - Werte auf Host prüfen mit `id -u` und `id -g`
 
 ### 3) Container bauen und starten
 
@@ -140,15 +161,19 @@ Der Smoke-Workflow führt fail-fast aus:
 5. Mini-Eval/Infer
 6. Smoke-Report unter `data/runs/smoke/report.txt`
 
-### 8) Vault-Dokumentation → `train.jsonl`
+### 8) Augmented Dataset bauen (Vault + Exact + Runbook + optional Self-Edits)
 
 ```bash
-make prepare-dataset-vault
+make prepare-dataset-augmented
 ```
 
-Erzeugt:
-- `data/datasets/train.jsonl`
-- optionaler Report: `data/datasets/prepare_report.json`
+Ablauf:
+
+1. Vault-Extraktion nach `data/datasets/train_vault.jsonl`
+2. Exact-Extraction Samples
+3. deterministische Runbook-Generierung (`runbook_samples.jsonl`)
+4. optional capped Self-Edit-Export (`SELF_EDITS_MERGE_ENABLE`, `SELF_EDITS_MERGE_CAP`)
+5. deduplizierter Merge nach `data/datasets/train.jsonl`
 
 ### 9) Regression-Eval auf `val.jsonl`
 
@@ -160,7 +185,38 @@ Ergebnisartefakte:
 - `data/evals/<run-id>/val_report.json`
 - `data/evals/<run-id>/val_predictions.jsonl`
 
-### 10) Retention sicher ausführen
+### 10) SEAL-MVP Self-Edits (deterministisch, auditierbar)
+
+```bash
+make self-edits-generate
+make self-edits-validate
+```
+
+Run-Artefakte:
+- `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+- `data/self_edits/runs/<run_id>/candidates.jsonl`
+- `data/self_edits/runs/<run_id>/verifications.jsonl`
+- `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+- `data/self_edits/runs/<run_id>/manifest.json`
+
+Stabiler Exportpfad:
+- `data/training/derived/self_edits.accepted.jsonl`
+
+### 11) Serving (gehärtet, OpenAI-kompatibel)
+
+```bash
+make serve-up
+make serve-health
+make serve-test
+```
+
+Merkmale:
+- Startet auch ohne `LATEST_OK` im Degraded-Status statt Crash
+- `/v1/chat/completions` liefert bei nicht bereitem Modell deterministisch `503`
+- Antwort-Sanitizer + anti-loop defaults aktiv
+- `make serve-test` schreibt Smoke-Report nach `data/evals/serve_smoke_<ts>.txt`
+
+### 12) Retention sicher ausführen
 
 ```bash
 make retention-clean
@@ -168,9 +224,10 @@ make retention-clean
 
 Betriebsverhalten:
 - Retention schützt den Run aus `data/runs/LATEST_REALRUN_ID` vor dem Pruning.
+- Promotete Adapter (`LATEST_OK_ADAPTER_ID`) bleiben geschützt.
 - Falls `LATEST_REALRUN_ID` auf einen fehlenden Adapter zeigt, wird der Pointer auf den neuesten vorhandenen Adapter-Run repariert.
 
-### 11) Swap nach schwerem Lauf zurücksetzen (Host)
+### 13) Swap nach schwerem Lauf zurücksetzen (Host)
 
 ```bash
 make swap-reset
@@ -180,7 +237,7 @@ Betriebsverhalten:
 - `swap-reset` wird nur ausgeführt, wenn `MemAvailable` auf dem Host größer als ca. 6 GB ist.
 - Bei zu wenig verfügbarem RAM wird der Schritt mit Warnung übersprungen.
 
-### 12) Single-Flight Lock + Swap-Gates (Stabilität)
+### 14) Single-Flight Lock + Swap-Gates (Stabilität)
 
 ```bash
 make lock-status
@@ -239,6 +296,10 @@ Hinweise:
 - Trainingslogs (TensorBoard): `data/logs/<run-id>/`
 - Datensätze: `data/datasets/`
 - Regression-Reports: `data/evals/<run-id>/val_report.json`
+- Serving-Smoke-Reports: `data/evals/serve_smoke_<ts>.txt`
+- Self-Edit-Run-Artefakte: `data/self_edits/runs/<run_id>/...`
+- Self-Edit-Export (accepted): `data/training/derived/self_edits.accepted.jsonl`
+- Self-Edit-Run-Pointer: `data/runs/LATEST_SELF_EDIT_RUN_ID`
 
 `data/` enthält Laufzeitartefakte und soll großteils **nicht versioniert** werden (siehe `.gitignore`).
 
@@ -246,16 +307,17 @@ Hinweise:
 
 ## Workflow-Überblick
 
-1. Datensatz erstellen/validieren (`prepare_dataset.py`, Schema in `src/datasets/schemas/`)
-2. Trainingskonfiguration wählen (`configs/train_lora_3b_k80.yaml` oder `configs/train_lora_3b_k80_short.yaml`)
-3. Single-Flight prüfen (`make check-single-flight` bzw. indirekt über Lauf-Targets)
-4. LoRA-Training ausführen (`make real-run-short` oder `make real-run-continue`)
-5. Continue-Priorität: zuerst letzter `real-*` Adapter mit `adapter_config.json`, erst danach generischer Fallback
-6. Swap-Gates vor schweren Schritten beachten (Train = abort bei kritisch, Eval = skip bei kritisch)
-7. Regression-Eval ausführen (`make eval-val`, non-blocking)
-8. Retention ausführen (`make retention-clean`) mit Schutz/Reparatur von `LATEST_REALRUN_ID`
-9. Optional klassische Eval ausführen (`src/scripts/eval.py`)
-10. Iterativ verbessern (später: Self-Edit-Pipeline via `generate_self_edits.py`)
+1. Datensatzquellen vorbereiten (`prepare_dataset.py`, optional `prepare-dataset-augmented`)
+2. Runbook-Samples deterministisch generieren (`make runbook-samples-generate`)
+3. Optional Self-Edits generieren/validieren (`make self-edits-generate`, `make self-edits-validate`)
+4. Trainingskonfiguration wählen (`configs/train_lora_3b_k80.yaml` oder `configs/train_lora_3b_k80_short.yaml`)
+5. Single-Flight prüfen (`make check-single-flight` bzw. indirekt über Lauf-Targets)
+6. LoRA-Training ausführen (`make real-run-short` oder `make real-run-continue`)
+7. Swap-Gates vor schweren Schritten beachten (Train = abort bei kritisch, Eval = skip bei kritisch)
+8. Regression-Eval ausführen (`make eval-val`, non-blocking)
+9. Promotion prüfen (`make promote-latest-ok`) und Serving nur bei neuer Promotion umschalten
+10. Serving testen (`make serve-test`)
+11. Retention ausführen (`make retention-clean`) mit Schutz von `LATEST_REALRUN_ID` und `LATEST_OK_ADAPTER_ID`
 
 ---
 
@@ -305,6 +367,16 @@ Für dieses Projekt ist eine feste, stabile GPU-Software-Baseline definiert:
 Betriebsregel:
 - Treiber/CUDA werden **nicht** aktualisiert.
 - Änderungen sind nur per expliziter Ausnahmefreigabe mit Risikoanalyse und Rollback-Plan zulässig.
+
+### Permissions / Ownership-Betriebsregel
+
+Um root-owned Artefakte unter `data/` zu vermeiden, läuft der Trainer-Container mit Host-UID/GID-Mapping:
+
+- Compose: `user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"`
+- `.env`: `USERMAP_UID`, `USERMAP_GID` korrekt auf Host setzen (`id -u`, `id -g`)
+- Nach Änderung immer neu erstellen:
+  - `docker compose -f docker/compose.yaml down`
+  - `docker compose -f docker/compose.yaml up -d --build`
 
 Basisimage-Entscheidung (Ubuntu statt Alpine):
 - Für CUDA-/PyTorch-Workloads auf K80 nutzen wir Ubuntu-basierte NVIDIA-Images.

@@ -4,15 +4,17 @@
 
 Diese Richtlinie definiert die verbindliche Backup- und Restore-Strategie für das Projekt `llm-homelab-training` mit Fokus auf:
 
-- Reproduzierbarkeit von Training/Evaluation
-- Auditierbarkeit von Runs
+- Reproduzierbarkeit von Training/Evaluation und Self-Edit-Abläufen
+- Auditierbarkeit von Runs (Training, Eval, Promotion, Self-Edit)
 - Trennung von Source-of-Truth und Laufzeitartefakten
 - Speicherökonomie bei großen ML-Artefakten
+- Schutz der für den SEAL-MVP kritischen Manifest-/Provenance-Artefakte
 
 Geltungsbereich:
 
 - Projektpfad: `opt/projects/llm-homelab-training`
 - Projektinhalte: Code, Konfiguration, Dokumentation, Metadaten, ausgewählte Laufzeitartefakte
+- explizit eingeschlossen: Self-Edit-Artefakte unter `data/self_edits/runs/<run_id>/` sowie der Exportpfad `data/training/derived/self_edits.accepted.jsonl`
 - Nicht im Scope: beliebige Host-weite Vollbackups außerhalb der hier definierten Pfade
 
 ---
@@ -69,6 +71,11 @@ Beispiele:
 - Repository-Inhalt (Code, Konfiguration, Dokumentation)
 - Run-Metadaten (Run-ID, Config-Snapshot, Dataset-Manifest, Metrik-Summary)
 - Finale oder beste Adapter-Artefakte (`best`/`final`)
+- Self-Edit-Manifeste und Verifikationsartefakte pro Run:
+  - `data/self_edits/runs/<run_id>/manifest.json`
+  - `data/self_edits/runs/<run_id>/verifications.jsonl`
+- Stabiler Derived-Export:
+  - `data/training/derived/self_edits.accepted.jsonl`
 
 Backup-Frequenz:
 - mindestens täglich
@@ -106,6 +113,8 @@ Backup-Frequenz:
 |---|---|---|---|---|
 | `opt/projects/llm-homelab-training` (ohne Excludes) | 1 | Voll/inkrementell | täglich | langfristig |
 | `data/` Run-Metadaten + finale Adapter | 1 | selektiv | täglich / nach Run | langfristig |
+| `data/self_edits/runs/<run_id>/manifest.json` + `verifications.jsonl` | 1 | selektiv | nach jedem Self-Edit-Run | langfristig |
+| `data/training/derived/self_edits.accepted.jsonl` | 1 | selektiv | nach jedem Self-Edit-Run | langfristig |
 | `data/` Logs/Reports sekundär | 2 | selektiv | wöchentlich | mittel |
 | Caches/temporäre Artefakte | 3 | standardmäßig ausgeschlossen | n/a | n/a |
 
@@ -195,6 +204,24 @@ Ziel:
 Erfolgskriterium:
 - dokumentierter Vergleich von altem Run-Kontext vs. aktuellem Build-Kontext
 - Abweichungen mit Maßnahmenplan
+
+### Drill E — Self-Edit Restore und Provenance-Kette (monatlich)
+
+Ziel:
+- Nachweis, dass ein Self-Edit-Run vollständig und auditierbar wiederhergestellt werden kann.
+
+Pflichtartefakte:
+- `data/self_edits/runs/<run_id>/manifest.json`
+- `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+- `data/self_edits/runs/<run_id>/candidates.jsonl`
+- `data/self_edits/runs/<run_id>/verifications.jsonl`
+- `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+- `data/training/derived/self_edits.accepted.jsonl` (stabiler Exportpfad)
+
+Erfolgskriterium:
+- alle Pflichtartefakte sind parsebar
+- `accepted.derived.jsonl` enthält nachvollziehbare Provenance-Referenzen auf Candidate/Source/Verification
+- Restore-Protokoll dokumentiert Run-ID, Zeitstempel, Verantwortlichen und Ergebnis
 
 ---
 

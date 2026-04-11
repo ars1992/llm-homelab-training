@@ -1,29 +1,30 @@
 # Datasets
 
-Dieses Verzeichnis definiert den Daten-Layer für Training, Evaluation und spätere Self-Edit-Erweiterungen.
+Dieses Verzeichnis definiert den Daten-Layer für Training, Evaluation und den implementierten SEAL-MVP-Self-Edit-Pfad.
 
 Ziele:
 - Einheitliches, reproduzierbares Datenformat
 - Klare Trennung zwischen Rohdaten, aufbereiteten Daten und generierten Daten
 - Kompatibilität mit dem MVP-Training (`src/scripts/train_lora.py`)
-- Vorbereitung auf SEAL-inspirierte Self-Edit-Datensätze (`schemas/self_edit.schema.json`)
+- Auditierbare Self-Edit-Datenflüsse inkl. Run-Artefakte und Derived-Export
+- Nutzung des Schemas `schemas/self_edit.schema.json` als strukturelle Referenz
 
 ---
 
 ## Verzeichnislogik
 
-Empfohlene lokale Struktur (unter `data/`, nicht im Repo versioniert):
+Empfohlene lokale Struktur (unter `data/`, überwiegend Laufzeitartefakte):
 
-- `data/datasets/raw/`  
-  Ursprungsdaten (Exports, Notizen, Logs, etc.)
-- `data/datasets/processed/`  
-  Aufbereitete, bereinigte Trainingsdaten
 - `data/datasets/train.jsonl`  
   Standard-Eingabe für MVP-LoRA-Training
 - `data/datasets/val.jsonl`  
-  Optional für Evaluierung/Monitoring
-- `data/datasets/test.jsonl`  
-  Optional für finale Vergleichsläufe
+  Regression/Evaluierung
+- `data/datasets/runbook_samples.jsonl`  
+  deterministische Runbook-Seed/Referenzsamples
+- `data/self_edits/runs/<run_id>/`  
+  vollständige SEAL-MVP-Run-Artefakte
+- `data/training/derived/self_edits.accepted.jsonl`  
+  stabiler Exportpfad für akzeptierte Derived Samples
 
 Schema-Definitionen bleiben im Repo unter:
 - `src/datasets/schemas/`
@@ -113,13 +114,26 @@ Vor jedem Lauf prüfen:
 
 ---
 
-## Bezug zu Self-Edit-Pipeline (später)
+## Bezug zur Self-Edit-Pipeline (SEAL-MVP, implementiert)
 
-Für die nächste Ausbaustufe werden zusätzlich Datensätze benötigt, die:
-- Modellantworten,
-- erkannte Fehler,
-- vorgeschlagene Selbstkorrekturen,
-- und Akzeptanzkriterien
+Die Self-Edit-Pipeline ist als deterministischer MVP implementiert und erzeugt pro Run:
 
-strukturiert enthalten.  
-Dafür ist `src/datasets/schemas/self_edit.schema.json` vorgesehen.
+- `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+- `data/self_edits/runs/<run_id>/candidates.jsonl`
+- `data/self_edits/runs/<run_id>/verifications.jsonl`
+- `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+- `data/self_edits/runs/<run_id>/manifest.json`
+
+Stabiler Trainings-Export:
+
+- `data/training/derived/self_edits.accepted.jsonl`
+
+Operationalisierung:
+
+- CLI: `src/scripts/generate_self_edits.py` mit `--mode placeholder|generate|validate`
+- Make:
+  - `make self-edits-generate`
+  - `make self-edits-validate`
+  - `make self-edits` (Alias auf `self-edits-generate`)
+
+Strukturierte Felder/Provenance bleiben durchgängig nachvollziehbar (u. a. `run_id`, `source_sample_id`, `candidate_id`, `verification_id`, `strategy`, `verdict`).

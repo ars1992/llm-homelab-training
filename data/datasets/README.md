@@ -51,8 +51,10 @@ Beispiele:
 - `prepare_vault_report.json`
 - `merge_report.json`
 - `val_validate_report.json`
-- `self_edits.jsonl`
+- `runbook_samples.report.json`
 - `self_edits.report.json`
+- `self_edits.accepted.jsonl`
+- `self_edits.accepted.capped.jsonl`
 
 Diese Dateien dürfen bei einem Runtime-Reset oder vor einem neuen End-to-End-Test entfernt und neu erzeugt werden.
 
@@ -89,8 +91,11 @@ Prüfberichte über Datensatzstruktur, Erzeugung oder Merge-Ergebnisse.
 Beispiele:
 
 - `prepare_report.json`
+- `prepare_vault_report.json`
 - `merge_report.json`
 - `val_validate_report.json`
+- `runbook_samples.report.json`
+- `self_edits.report.json`
 
 ---
 
@@ -123,6 +128,25 @@ Für `val.jsonl` gelten zusätzliche fachliche Felder, z. B.:
 
 ---
 
+## Automatisierte Generierungspfade
+
+Aktuell werden folgende Dateiarten automatisiert erzeugt oder aktualisiert:
+
+1. Runbook-Varianten (deterministisch):
+   - Generator: `src/scripts/generate_runbook_samples.py`
+   - Standardziel: `runbook_samples.jsonl`
+   - Report: `runbook_samples.report.json`
+
+2. SEAL-MVP Derived Exporte:
+   - Orchestrator: `src/scripts/generate_self_edits.py` (`--mode generate`)
+   - Stabiler Exportpfad: `data/training/derived/self_edits.accepted.jsonl`
+   - Merged-Cap-Datei für `prepare-dataset-augmented`:
+     - `data/training/derived/self_edits.accepted.capped.jsonl`
+
+Wichtig:
+- `runbook_samples.jsonl` ist weiterhin eine versionierte Referenz-/Seeddatei.
+- `self_edits.accepted*.jsonl` sind laufzeitgenerierte Derived-Artefakte für den Trainingspfad.
+
 ## Betriebsregeln
 
 1. Keine Secrets, Tokens oder Zugangsdaten in Datensatzdateien speichern.
@@ -150,8 +174,9 @@ Entfernt werden dürfen je nach Reset-Modus insbesondere:
 - `train.jsonl`
 - `train_vault.jsonl`
 - `train.normalized.jsonl`
-- vorbereitende Reports
-- temporäre Self-Edit-Dateien
+- vorbereitende Reports (`prepare_*.json`, `merge_report.json`, `val_validate_report.json`, `runbook_samples.report.json`)
+- temporäre oder abgeleitete Self-Edit-Dateien (`self_edits*.jsonl`, `self_edits*.json`)
+- Derived-Exports unter `data/training/derived/` (wenn ein vollständiger Rebuild gewünscht ist)
 
 ---
 

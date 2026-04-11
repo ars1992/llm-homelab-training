@@ -1,47 +1,51 @@
 # SEAL-PLANUNG-ELIOT-ANTWORTEN
 
 ## Dokumentkontrolle
-- Status: Arbeitsstand / Planungsgrundlage
-- Version: 1.0
-- Datum: 2026-04-10
-- Quelle: Antworten von Eliot auf die SEAL-Planungsfragen
-- Geltungsbereich: `llm-homelab-training`, zukünftiger Ausbau von `src/scripts/generate_self_edits.py`
+- Status: Teilweise umgesetzt / Betriebsgrundlage + Backlog
+- Version: 2.0
+- Datum: 2026-04-11
+- Quelle: Antworten von Eliot auf die SEAL-Planungsfragen + umgesetzter Projektstand
+- Geltungsbereich: `llm-homelab-training`, Self-Edit/SEAL-MVP in `src/scripts/generate_self_edits.py`
 
 ---
 
 ## Zweck
 
-Dieses Dokument hält die von Eliot gelieferten Planungsantworten für den nächsten Ausbau des Projekts in Richtung einer SEAL-inspirierten Self-Edit-Pipeline fest.
+Dieses Dokument hält die von Eliot gelieferten Planungsantworten fest und mappt sie auf den aktuellen Implementierungsstand im Projekt.
 
-Ziel ist eine nachvollziehbare, auditierbare und technisch umsetzbare Grundlage für den Umbau von:
+Ziel ist eine nachvollziehbare, auditierbare Grundlage für:
 
-- `src/scripts/generate_self_edits.py`
+- bereits umgesetzte SEAL-MVP-Bausteine in `src/scripts/generate_self_edits.py`
+- verbleibende Ausbauschritte (Backlog) nach MVP
 
 Wichtig:
-- Der aktuelle Codezustand ist weiterhin ein Placeholder.
-- Dieses Dokument beschreibt die geplante fachliche Zielstruktur, nicht den bereits umgesetzten Ist-Zustand.
+- Der Placeholder-Modus bleibt absichtlich erhalten (Kompatibilität/Debug).
+- Zusätzlich sind `generate`- und `validate`-Modus produktiv umgesetzt.
+- Dieses Dokument trennt deshalb explizit zwischen **Ist-Stand** und **offenem Backlog**.
 
 ---
 
 ## Ausgangslage
 
-Das Skript `src/scripts/generate_self_edits.py` ist derzeit ein technischer Placeholder mit folgendem Verhalten:
+Das Skript `src/scripts/generate_self_edits.py` ist inzwischen als deterministischer SEAL-MVP-Orchestrator umgesetzt und unterstützt:
 
-- Einlesen eines JSONL-Datasets
-- Validierung von Basisfeldern
-- Erzeugung deterministischer Placeholder-Kandidaten
-- Schreiben von JSONL- und Report-Artefakten
-- keine echte modellbasierte Edit-Generierung
-- keine Verifikation
-- keine Akzeptanzentscheidung
-- keine Rückführung akzeptierter Edits in Trainingsdaten
+- `--mode placeholder` (legacy-kompatibler Pfad)
+- `--mode generate` (Kandidaten erzeugen, verifizieren, akzeptierte Derived-Samples exportieren)
+- `--mode validate` (fail-fast Validierung von Run-Artefakten und Export)
 
-Damit ist das Skript aktuell nur geeignet für:
+Umgesetzte Artefakte pro Self-Edit-Run:
 
-- Pfadstabilisierung
-- Formatvalidierung
-- frühe Pipeline-Vorbereitung
-- Audit- und Report-Struktur
+- `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+- `data/self_edits/runs/<run_id>/candidates.jsonl`
+- `data/self_edits/runs/<run_id>/verifications.jsonl`
+- `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+- `data/self_edits/runs/<run_id>/manifest.json`
+
+Stabiler Exportpfad:
+
+- `data/training/derived/self_edits.accepted.jsonl`
+
+Damit ist der Stand nicht mehr reiner Placeholder, sondern ein produktiver, auditierbarer MVP mit regelbasierter Verifikation.
 
 ---
 
@@ -90,8 +94,15 @@ Von Eliot empfohlener End-to-End-Ablauf:
    - Reject-Gründe aggregieren
    - daraus nächste Kandidaterzeugung steuern
 
-### Offene Entscheidung
-Ob automatisches Re-Prompting bereits im MVP enthalten sein soll, ist noch nicht entschieden.
+### Offene Entscheidung / Rest-Backlog
+Im MVP weiterhin bewusst nicht enthalten:
+
+1. automatisches Re-Prompting
+2. LLM-Judge als zweiter Verifier
+3. Human-Review-Queue für `needs_review`
+4. Gewichtungs-/Samplinglogik für Merge in `train.jsonl` über Basis-Cap hinaus
+
+Diese Punkte bleiben als kontrollierter Ausbaupfad nach dem deterministischen MVP.
 
 ---
 

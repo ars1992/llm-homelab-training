@@ -128,25 +128,52 @@ Wiederholbare Abläufe und kontrollierbares Fehlermanagement für längere Train
 
 ---
 
-## Phase 5 — SEAL-inspirierte Self-Edit Pipeline (Inkrement 1)
+## Phase 5 — SEAL-MVP Self-Edit Pipeline (Accepted / umgesetzt)
 
 ### Ziel
-Kontrollierte Einführung einer Self-Edit-Schleife ohne Verlust der Reproduzierbarkeit.
+Deterministische, auditierbare Self-Edit-Pipeline als reproduzierbarer Erweiterungspfad des Trainingssystems.
 
-### Lieferobjekte
-- `src/scripts/generate_self_edits.py` Ausbau von Placeholder zu iterativer Logik
-- Datenflussdefinition: Ausgangsantwort → Edit-Kandidat → Bewertung → Akzeptanz
-- Event-/Audit-Felder je Self-Edit-Schritt (ID-Kette, parent_record_id, status)
+### Umgesetzter Stand (Ist)
+- `src/scripts/generate_self_edits.py` als stabiler Entry-Point mit Modi:
+  - `--mode placeholder` (kompatibler Legacy-Pfad)
+  - `--mode generate` (deterministischer Self-Edit-Loop)
+  - `--mode validate` (fail-fast Artefakt-/JSONL-Validierung)
+- Verbindliche Run-Artefakte unter:
+  - `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+  - `data/self_edits/runs/<run_id>/candidates.jsonl`
+  - `data/self_edits/runs/<run_id>/verifications.jsonl`
+  - `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+  - `data/self_edits/runs/<run_id>/manifest.json`
+- Stabiler Exportpfad:
+  - `data/training/derived/self_edits.accepted.jsonl`
+- Makefile-Integration:
+  - `make self-edits-generate`
+  - `make self-edits-validate`
+  - `make self-edits` als Alias auf `self-edits-generate`
+- Deterministische Verifikation:
+  - Entscheidungen `accept | reject | needs_review`
+  - regelbasierte Checks (Pflichtfelder, No-op/Diff, einfache Policy-Heuristiken)
 
-### Akzeptanzkriterien
-1. Self-Edit-Datensätze entsprechen Schema und enthalten eindeutige IDs.
-2. Jeder Edit-Schritt ist auditierbar (Zeitpunkt, Akteurtyp, Quelle, Status).
-3. Pipeline kann in „dry-run“ und „commit-run“ betrieben werden.
-4. Fehlerzustände sind definiert (z. B. Invalid Edit, Reject, Timeout, Judge-Fehler).
+### Abnahme (erfüllt)
+1. Run-Artefakte + Manifest werden pro Run konsistent erzeugt.
+2. Accepted-Export ist vorhanden und als JSONL validierbar.
+3. Provenance-Felder in Accepted-Samples sind vorhanden (candidate/source/verification refs).
+4. Validate-Modus schlägt bei Strukturfehlern deterministisch fehl.
 
-### Risiken
-- Qualitätsdrift durch fehlerhafte automatische Edits
-- Zu hohe Laufzeitkosten auf K80 bei iterativen Schleifen
+### Risiken (verbleibend)
+- Qualitätsgrenze durch rein regelbasierten Verifier (ohne semantischen Judge).
+- Zusätzlicher Storage- und Retention-Bedarf für `data/self_edits/runs/`.
+
+### Next-Phase Backlog (Phase 5.x)
+1. Human-Review-Queue für `needs_review` inkl. Freigabe-/Ablehnungsworkflow.
+2. Optionaler zweiter Verifier (LLM-Judge) als explizit aktivierbarer Modus.
+3. Merge-Strategie für Derived Samples im Training feinjustieren:
+   - Cap/Weighting/Sampling pro Laufprofil
+   - Dedupe- und Prioritätsregeln dokumentieren
+4. Qualitätsmetriken für Self-Edit-Wirkung verbindlich machen:
+   - Einfluss auf `eval-val`-Teilmetriken
+   - Delta-Reporting je Run
+5. Retention-Regeln für Self-Edit-Artefakte formalisieren (Schutz kritischer Runs/Manifeste).
 
 ---
 

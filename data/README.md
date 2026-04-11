@@ -14,14 +14,22 @@ Ziel: Reproduzierbarkeit der Pipeline bei gleichzeitiger Trennung von Source-Cod
 ```text
 data/
 ├── README.md                  # Diese Datei
-├── datasets/                  # Lokale Datensätze (JSONL/Parquet/etc.)
+├── datasets/                  # Lokale Datensätze (JSONL/Reports/Seeds)
 │   ├── train.jsonl
 │   ├── val.jsonl
-│   └── test.jsonl
+│   └── runbook_samples.jsonl
 ├── models/                    # Trainierte Adapter/Checkpoints
 │   └── <run-id>/
-└── logs/                      # TensorBoard und Trainingslogs
-    └── <run-id>/
+├── logs/                      # TensorBoard und Trainingslogs
+│   └── <run-id>/
+├── evals/                     # Eval- und Serving-Smoke-Reports
+│   └── <run-id>/
+├── self_edits/                # SEAL-MVP Run-Artefakte
+│   └── runs/
+│       └── <run-id>/
+└── training/
+    └── derived/               # Exportierte, abgeleitete Trainingssamples
+        └── self_edits.accepted.jsonl
 ```
 
 ## Erwartete Pfade im Projekt
@@ -29,6 +37,9 @@ data/
 - Trainingsdaten (MVP): `data/datasets/train.jsonl`
 - LoRA-Adapter Output: `data/models/<run-id>/`
 - TensorBoard-Logs: `data/logs/<run-id>/`
+- Eval-Reports: `data/evals/<run-id>/`
+- Self-Edit Run-Artefakte: `data/self_edits/runs/<run-id>/`
+- Derived Export (SEAL-MVP): `data/training/derived/self_edits.accepted.jsonl`
 
 ## Hinweis zur Reproduzierbarkeit
 
@@ -43,6 +54,6 @@ Reproduzierbarkeit wird durch folgende Kombination erreicht:
 
 Da `data/` schnell groß werden kann:
 
-- Regelmäßig alte Runs unter `data/models/` und `data/logs/` bereinigen
-- Wichtige Runs gezielt extern sichern (z. B. NAS)
-- Nur Metadaten/Configs ins Repo übernehmen, nicht Binärartefakte
+- Regelmäßig alte Runs unter `data/models/`, `data/logs/`, `data/evals/` und `data/self_edits/runs/` bereinigen
+- Wichtige Runs und abgeleitete Trainingsdaten (`data/training/derived/`) gezielt extern sichern (z. B. NAS)
+- Nur Metadaten/Configs ins Repo übernehmen, nicht große Binärartefakte oder flüchtige Laufzeitoutputs

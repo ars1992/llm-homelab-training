@@ -40,10 +40,11 @@ Vor Start müssen folgende Bedingungen erfüllt sein:
   - `docker/compose.serve.yaml`
 - Serving-App vorhanden:
   - `src/serve/app.py`
-- Trainings-/Eval-Pipeline funktionsfähig:
+- Trainings-/Eval-/Serving-Smoke-Pipeline funktionsfähig:
   - `make real-run-short`
   - `make eval-val`
   - `make promote-latest-ok`
+  - `make serve-test`
 - Pointer-Dateien vorhanden oder anlegbar:
   - `data/runs/LATEST_REALRUN_ID`
   - `data/runs/LATEST_OK_ADAPTER_ID`
@@ -106,7 +107,10 @@ Betriebsregel:
 
 Hinweis:
 - Eine leere `LATEST_OK_ADAPTER_ID` ist vor der ersten Promotion zulässig.
-- In diesem Zustand kann der Serving-Service starten, muss aber im Health-Status einen Fehler oder „nicht bereit“ melden.
+- In diesem Zustand startet der Serving-Service im **degraded**-Modus (kein Crash).
+- Erwartetes Verhalten:
+  - `/health` liefert `status=degraded` mit klarer `message`.
+  - `POST /v1/chat/completions` liefert deterministisch HTTP `503`.
 
 ---
 
@@ -121,14 +125,14 @@ Hinweis:
 ### 6.3 Erwartung
 - [ ] Docker-Service `serve` startet
 - [ ] Container beendet sich nicht sofort
-- [ ] Kein offensichtlicher Import-/Model-Load-Fehler im Log
+- [ ] Uvicorn/App startet stabil (kein Crash-Loop), auch wenn Modellladung im degraded-Modus endet
 
 **Fehlerbilder**
 | Fehlerfall | Detektion | Ursache (vermutet/bestätigt) | Reaktion | Operator-Info |
 |---|---|---|---|---|
 | Container startet nicht | `make serve-up` fehlschlägt | Compose-/Build-Fehler | Build-/Config-Fehler isolieren | Serving nicht betriebsbereit |
 | Container startet, beendet sich aber | `make serve-logs` zeigt Exit | Import-/Runtime-Fehler | Logs analysieren, Abhängigkeiten prüfen | Serving nicht betriebsbereit |
-| Container läuft, aber kein Modell geladen | Health zeigt Fehler | `LATEST_OK_ADAPTER_ID` leer/ungültig | Promotion oder Pointer korrigieren | Erwartbar vor erster Freigabe |
+| Container läuft, aber kein Modell geladen | `/health` zeigt `status=degraded`; `/v1/chat/completions` liefert 503 | `LATEST_OK_ADAPTER_ID` leer/ungültig oder Adapter nicht ladbar | Promotion durchführen oder Pointer korrigieren | Erwartbar vor erster Freigabe, Service bleibt erreichbar |
 
 ---
 
@@ -147,9 +151,9 @@ Hinweis:
   - `runtime_device`
 
 ### 7.3 Erwartung ohne freigegebenen Adapter
-- [ ] Antwort zeigt klaren Fehlerzustand
-- [ ] Fehler verweist auf fehlenden/ungültigen Pointer
-- [ ] Verhalten ist deterministisch und nachvollziehbar
+- [ ] Antwort zeigt `status=degraded`
+- [ ] `message` verweist klar auf fehlenden/ungültigen Pointer bzw. nicht ladbaren Adapter
+- [ ] Verhalten ist deterministisch und nachvollziehbar (`/health` erreichbar, Chat-Endpunkt 503)
 
 **No-Go Bedingungen**
 - [ ] Health-Endpunkt nicht erreichbar
@@ -160,7 +164,14 @@ Hinweis:
 
 ## 8) OpenAI-kompatiblen Endpunkt prüfen
 
-### 8.1 Minimalen Chat-Test senden
+### 8.1 Standardisierter Smoke-Test (empfohlen)
+- [ ] `make serve-test` ausführen
+- [ ] Report prüfen unter `data/evals/serve_smoke_<timestamp>.txt`
+- [ ] Akzeptanz erfüllt:
+  - [ ] alle Standardfälle PASS
+  - [ ] keine Wrapper-/Template-Leaks (`### Input`, `### Response`, `### Instruction`, `Kontext:`, `Antwort:`)
+
+### 8.2 Manueller Minimal-Chat-Test (optional)
 - [ ] Befehl ausführen:
 
 ```/dev/null/serve-chat-test.sh#L1-12
@@ -177,7 +188,7 @@ curl -sS http://127.0.0.1:8901/v1/chat/completions \
   }'
 ```
 
-### 8.2 Erwartung
+### 8.3 Erwartung
 - [ ] JSON-Antwort vorhanden
 - [ ] Struktur enthält:
   - `id`
@@ -187,6 +198,7 @@ curl -sS http://127.0.0.1:8901/v1/chat/completions \
   - `choices`
   - `usage`
 - [ ] `choices[0].message.content` ist nicht leer
+- [ ] Antwort enthält keine Template-/Wrapper-Leaks
 
 **Fehlerbilder**
 | Fehlerfall | Detektion | Ursache (vermutet/bestätigt) | Reaktion | Operator-Info |
