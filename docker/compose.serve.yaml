@@ -23,7 +23,7 @@ services:
             HF_HOME: ${HF_HOME:-/workspace/.cache/huggingface}
             HF_DATASETS_CACHE: ${HF_DATASETS_CACHE:-/workspace/.cache/huggingface/datasets}
             TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/workspace/.cache/huggingface/transformers}
-            PYTORCH_CUDA_ALLOC_CONF: ${PYTORCH_CUDA_ALLOC_CONF:-}
+            PYTORCH_CUDA_ALLOC_CONF: "${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128}"
             SERVE_PORT: ${SERVE_PORT:-8901}
             SERVE_HOST: ${SERVE_HOST:-0.0.0.0}
             BASE_MODEL: ${BASE_MODEL:-facebook/opt-2.7b}

@@ -47,7 +47,7 @@ data:
     # Zweck: Prompt-Struktur ohne Input-Block.
     # Auswirkung: verhindert unnötigen Prompt-Rauschen bei leeren Inputs.
 
-    max_seq_length: 384 # Zweck: maximale Tokenlänge pro Trainingsbeispiel. Auswirkung: zentraler VRAM-/Swap-Hebel; höher = mehr Kontext, aber höheres OOM-Risiko.
+    max_seq_length: 256 # Zweck: maximale Tokenlänge pro Trainingsbeispiel. Auswirkung: zentraler VRAM-/Swap-Hebel; REDUZIERT auf 256 wegen OOM auf K80.
     truncation: true # Zweck: überlange Beispiele werden abgeschnitten. Auswirkung: schützt Speicher, kann Inhalte verlieren.
     packing: false # Zweck: kein Zusammenpacken mehrerer Samples in eine Sequenz. Auswirkung: stabileres Sample-Verhalten, geringerer Durchsatz.
     num_proc: 1 # Zweck: begrenzte Parallelität bei Datenvorbereitung. Auswirkung: geringere RAM-Spitzen und weniger Swap-Druck auf dem Host.
@@ -84,7 +84,7 @@ training:
 
     gradient_checkpointing: true # Zweck: Speicherersparnis via Recompute. Auswirkung: weniger VRAM-Bedarf, dafür längere Schrittzeiten.
     optim: "adamw_torch" # Zweck: stabiler Optimizer-Standard für Transformer-Finetuning. Auswirkung: robustes, reproduzierbares Trainingsverhalten.
-    dataloader_num_workers: 0 # Zweck: Loader-Parallelität stark begrenzen. Auswirkung: minimiert CPU-/RAM-Spitzen im Short-Run.
+    dataloader_num_workers: 0 # Zweck: Loader-Parallelität stark begrenzen. Auswirkung: minimiert CPU-/RAM-Spitzen im Short-Run. Auf 0 belassen wegen OOM-Risiko.
 
     logging_steps: 5 # Zweck: Logintervall. Auswirkung: enges Monitoring bei überschaubarem Logging-Overhead.
     save_steps: 30 # Zweck: Checkpoint-Intervall. Auswirkung: Mid-Run-Snapshot + Endsnapshot, guter Recovery-Kompromiss.
