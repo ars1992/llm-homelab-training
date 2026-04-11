@@ -6,6 +6,7 @@ services:
             context: ..
             dockerfile: docker/Dockerfile
         container_name: llm-homelab-trainer
+        user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"
         working_dir: /workspace
         stdin_open: true
         tty: true

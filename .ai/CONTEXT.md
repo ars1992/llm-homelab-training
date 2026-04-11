@@ -66,6 +66,8 @@ Aktiv genutzte Variablen im aktuellen Projektstand:
   - `HF_DATASETS_CACHE`
   - `TRANSFORMERS_CACHE`
   - `TENSORBOARD_PORT`
+  - `USERMAP_UID`
+  - `USERMAP_GID`
 - Serving / Compose:
   - `NVIDIA_VISIBLE_DEVICES`
   - `CUDA_VISIBLE_DEVICES`
@@ -164,6 +166,25 @@ Hinweis zu Continue-Priorität und Stabilitäts-Gates:
     - `docker/compose.serve.yaml` (serve)
 - Betriebsregel:
   - Bei sporadischen OOMs im Modell-Load/Eval zuerst diese Einstellung aktiv halten und Container neu starten, bevor tiefere Parameteränderungen erfolgen.
+
+### Permissions-Prävention für data/ (UID/GID-Mapping)
+- Problemklasse:
+  - Root-owned Artefakte unter `data/evals`, `data/logs`, `data/models`, `data/datasets` können `retention-clean` und Folgeprozesse blockieren.
+- Prävention:
+  - `docker/compose.yaml` (Service `trainer`) nutzt Host-User-Mapping:
+    - `user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"`
+  - `.env.example` enthält:
+    - `USERMAP_UID=1000`
+    - `USERMAP_GID=1000`
+  - Hostwerte müssen lokal verifiziert werden:
+    - `id -u`
+    - `id -g`
+- Recovery für Altartefakte (einmalig):
+  - `sudo chown -R <user>:<group> data/evals`
+  - optional:
+    - `sudo chown -R <user>:<group> data/logs data/models data/datasets`
+- Betriebswirkung:
+  - Neue Artefakte sollen host-owned geschrieben werden; `make retention-clean` läuft damit ohne manuelle Rechtekorrektur.
 
 ### Automatisierte Runbook-Sample-Generierung (neu)
 - Neues Generator-Skript:

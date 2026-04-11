@@ -258,6 +258,22 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - bei identischem Input + Seed sind erzeugte JSONL-Dateien byte-identisch (Hashvergleich als Betriebscheck).
     - Betriebsentscheidung:
       - Runbook-Samples werden als aktiver Hebel zur Gate-Verbesserung geführt, bevor größere Architekturerweiterungen (z. B. SEAL-Loop) priorisiert werden.
+  - Permission-Fix Entscheidung für Datenartefakte dokumentiert:
+    - Ursache bestätigt: root-owned Artefakte unter `data/*` durch Containerprozesse ohne Host-UID/GID-Mapping.
+    - Umgesetzte Prävention:
+      - `docker/compose.yaml` (`trainer`) nutzt `user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"`.
+      - `.env.example` enthält `USERMAP_UID` und `USERMAP_GID` als konfigurierbare Betriebsparameter.
+    - Betriebsregel:
+      - Host-UID/GID vor Inbetriebnahme mit `id -u` / `id -g` prüfen und in `.env` setzen.
+      - Nach der Umstellung Container neu erstellen (`down` + `up -d --build`), damit das Mapping wirksam ist.
+    - Recovery für Altartefakte:
+      - Einmaliger Ownership-Fix per `chown -R <user>:<group>` auf betroffenen `data/`-Unterpfaden.
+    - Erwarteter Nutzen:
+      - `retention-clean` und Folgeprozesse laufen ohne manuelle Rechtekorrektur.
+  - Zed-Task-Memory ergänzt:
+    - Task-Dokument angelegt: `.ai/TASK-ZED-0001-Fix-Permissions-Data-Mount.md`.
+    - Inhalt: Zielbild, Scope, technische Änderungen, Akzeptanzkriterien, Testplan, Recovery, Risiken und Audit-Hinweise.
+    - Status: als wiederverwendbare Betriebsanweisung für zukünftige Sessions/Hosts geführt.
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.
