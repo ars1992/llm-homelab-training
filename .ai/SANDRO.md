@@ -274,6 +274,31 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
     - Task-Dokument angelegt: `.ai/TASK-ZED-0001-Fix-Permissions-Data-Mount.md`.
     - Inhalt: Zielbild, Scope, technische Änderungen, Akzeptanzkriterien, Testplan, Recovery, Risiken und Audit-Hinweise.
     - Status: als wiederverwendbare Betriebsanweisung für zukünftige Sessions/Hosts geführt.
+  - SEAL-MVP Implementierungsentscheidung umgesetzt und als Betriebsmuster festgehalten:
+    - ADR-0003 wurde von `Proposed` auf `Accepted` überführt.
+    - `src/scripts/generate_self_edits.py` ist jetzt stabiler Entry-Point mit drei Modi:
+      - `--mode placeholder` (legacy-kompatibel für Pfad-/Formatstabilität)
+      - `--mode generate` (deterministischer Self-Edit-Loop)
+      - `--mode validate` (fail-fast Validierung für Run-Artefakte und Export)
+    - Verbindliche Artefaktstruktur pro Run umgesetzt:
+      - `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+      - `data/self_edits/runs/<run_id>/candidates.jsonl`
+      - `data/self_edits/runs/<run_id>/verifications.jsonl`
+      - `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+      - `data/self_edits/runs/<run_id>/manifest.json`
+    - Stabiler Exportpfad umgesetzt:
+      - `data/training/derived/self_edits.accepted.jsonl`
+    - Deterministische Verifikation aktiv:
+      - Entscheidungen: `accept | reject | needs_review`
+      - Regelbasis: Pflichtfelder/Schema-Basis, No-op/Diff, einfache Policy-Heuristiken
+    - Makefile-Operating-Pattern ergänzt:
+      - `make self-edits` (Alias auf `self-edits-generate`)
+      - `make self-edits-generate`
+      - `make self-edits-validate` (optional mit `SELF_EDITS_VALIDATE_RUN_ID=<run_id>`)
+    - Referenznachweis:
+      - Run `self-edit-20260411T102943Z` wurde erfolgreich generiert und validiert (`result=ok`).
+    - Betriebsprinzip bestätigt:
+      - Self-Edit-Derived-Daten bleiben strikt getrennt von Source-Daten und werden nur über den dedizierten Exportpfad weiterverwendet.
 
 - 2026-04-05:
   - Erstfassung als projektübergreifendes Gedächtnis angelegt.

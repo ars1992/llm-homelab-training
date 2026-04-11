@@ -58,6 +58,16 @@ RUNBOOK_SAMPLES := data/datasets/runbook_samples.jsonl
 RUNBOOK_SAMPLES_REPORT := data/datasets/runbook_samples.report.json
 VAL_VALIDATE_REPORT := data/datasets/val_validate_report.json
 
+SELF_EDITS_RUNS_ROOT := data/self_edits/runs
+SELF_EDITS_EXPORT_ACCEPTED := data/training/derived/self_edits.accepted.jsonl
+SELF_EDITS_MAX_SOURCES ?= 50
+SELF_EDITS_CANDIDATES_PER_SOURCE ?= 1
+SELF_EDITS_SEED ?= 1337
+SELF_EDITS_VALIDATE_RUN_ID ?=
+SELF_EDITS_MERGE_ENABLE ?= 1
+SELF_EDITS_MERGE_CAP ?= 200
+SELF_EDITS_MERGE_CAPPED := data/training/derived/self_edits.accepted.capped.jsonl
+
 RUN_LOCK_FILE := $(RUN_STATE_DIR)/LOCK
 SWAP_GATE_SWAPFREE_MIN_KB ?= 524288
 SWAP_GATE_MEM_MIN_KB ?= 2000000
@@ -68,7 +78,7 @@ SWAP_GATE_MEM_MIN_KB ?= 2000000
 	ensure-data-dirs \
 	train eval eval-val validate-val prepare-dataset prepare-dataset-vault \
 	prepare-dataset-exact runbook-samples-generate prepare-dataset-augmented \
-	self-edits tensorboard \
+	self-edits self-edits-generate self-edits-validate tensorboard \
 	real-run-short real-run-continue run-status nightly-run promote-latest-ok \
 	serve-up serve-down serve-logs serve-health serve-reload serve-test \
 	smoke smoke-dataset smoke-train smoke-infer smoke-report \
@@ -102,7 +112,10 @@ help:
 	@echo "  prepare-dataset-exact      - Extract exact_extraction samples from /vault/exact_extraction MD files"
 	@echo "  prepare-dataset-augmented  - Vault dataset + append exact_extraction + runbook samples -> train.jsonl"
 	@echo "  runbook-samples-generate   - Generate deterministic runbook_samples.jsonl from val-rb-* cases"
-	@echo "  self-edits                 - Generate placeholder self-edit candidates"
+	@echo "  self-edits                 - Backward-compatible alias to self-edits-generate"
+	@echo "  self-edits-generate        - Run deterministic SEAL-MVP generation and export accepted derived samples"
+	@echo "  self-edits-validate        - Validate SEAL-MVP run artifacts (set SELF_EDITS_VALIDATE_RUN_ID=<run_id>)"
+	@echo "  (augmented merge)          - Uses capped self-edits export ($(SELF_EDITS_MERGE_CAP)) with priority before vault/runbook"
 	@echo "  tensorboard                - Start tensorboard in container (port 6006)"
 	@echo "  real-run-short             - Fresh short run (new adapter from base model)"
 	@echo "  real-run-continue          - Continue from latest OK adapter; fallback to fresh short run"
@@ -401,18 +414,19 @@ prepare-dataset-exact: up
 		echo "INFO: Seed file $(EXACT_EXTRACTION_OUTPUT) will be used if it exists (checked during augment step)."; \
 	fi
 
-# C1+C2+C3: Augmented dataset build:
+# C1+C2+C3+C4: Augmented dataset build:
 #   1. Vault markdown extraction -> data/datasets/train_vault.jsonl
 #   2. Exact extraction samples from MD triplets (if vault mounted, else seed file used)
 #   3. Deterministic runbook sample generation -> data/datasets/runbook_samples.jsonl
-#   4. Merge vault + exact_extraction + runbook samples -> train.jsonl (deduplicated)
+#   4. Deterministic capped self-edits export -> data/training/derived/self_edits.accepted.capped.jsonl
+#   5. Merge self-edits(capped, prioritized) + vault + exact_extraction + runbook -> train.jsonl (deduplicated)
 # Use this instead of prepare-dataset-vault when supplemental samples should be included.
 prepare-dataset-augmented: up
 	@echo "##############"
 	@echo "### STEP prepare-dataset-augmented: build merged train dataset"
 	@echo "##############"
 	@set -e; \
-	echo "INFO: Step 1/4 — Vault markdown extraction -> train_vault.jsonl"; \
+	echo "INFO: Step 1/5 — Vault markdown extraction -> train_vault.jsonl"; \
 	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/prepare_dataset.py \
 		--mode vault_md \
 		--vault-root $(VAULT_DOCS_ROOT) \
@@ -421,13 +435,23 @@ prepare-dataset-augmented: up
 		--max-samples 4000 \
 		--redact-secrets true \
 		--report data/datasets/prepare_vault_report.json; \
-	echo "INFO: Step 2/4 — Exact extraction samples (vault or seed)"; \
+	echo "INFO: Step 2/5 — Exact extraction samples (vault or seed)"; \
 	$(MAKE) prepare-dataset-exact; \
-	echo "INFO: Step 3/4 — Generate deterministic runbook samples"; \
+	echo "INFO: Step 3/5 — Generate deterministic runbook samples"; \
 	$(MAKE) runbook-samples-generate; \
-	echo "INFO: Step 4/4 — Merging all sources -> train.jsonl"; \
+	echo "INFO: Step 4/5 — Prepare deterministic capped self-edits export (cap=$(SELF_EDITS_MERGE_CAP), enable=$(SELF_EDITS_MERGE_ENABLE))"; \
+	mkdir -p data/training/derived; \
+	: > $(SELF_EDITS_MERGE_CAPPED); \
+	if [ "$(SELF_EDITS_MERGE_ENABLE)" = "1" ] && [ -f $(SELF_EDITS_EXPORT_ACCEPTED) ]; then \
+		python3 -c "from pathlib import Path; src=Path('$(SELF_EDITS_EXPORT_ACCEPTED)'); dst=Path('$(SELF_EDITS_MERGE_CAPPED)'); cap=int('$(SELF_EDITS_MERGE_CAP)'); lines=[ln for ln in src.read_text(encoding='utf-8').splitlines() if ln.strip()]; dst.write_text('\n'.join(lines[:cap]) + ('\n' if lines[:cap] else ''), encoding='utf-8')"; \
+		echo "INFO: self-edits capped export prepared -> $(SELF_EDITS_MERGE_CAPPED)"; \
+	else \
+		echo "INFO: self-edits merge disabled or export missing; using empty $(SELF_EDITS_MERGE_CAPPED)"; \
+	fi; \
+	echo "INFO: Step 5/5 — Merging all sources with deterministic priority weighting -> train.jsonl"; \
 	./scripts/run_nice.sh $(COMPOSE) exec -T $(SERVICE) python src/scripts/merge_datasets.py \
 		--sources \
+			$(SELF_EDITS_MERGE_CAPPED) \
 			data/datasets/train_vault.jsonl \
 			$(EXACT_EXTRACTION_OUTPUT) \
 			$(RUNBOOK_SAMPLES) \
@@ -437,11 +461,51 @@ prepare-dataset-augmented: up
 		--validate-schema; \
 	echo "OK: prepare-dataset-augmented completed -> $(VAULT_PREPARE_OUTPUT)"
 
-self-edits: up
-	@$(COMPOSE) exec $(SERVICE) python src/scripts/generate_self_edits.py \
+self-edits: self-edits-generate
+
+self-edits-generate: up
+	@echo "##############"
+	@echo "### STEP self-edits-generate: deterministic SEAL-MVP generation"
+	@echo "##############"
+	@set -e; \
+	RUN_ID=self-edit-$$(date -u +%Y%m%dT%H%M%SZ); \
+	OUTPUT_DIR=$(SELF_EDITS_RUNS_ROOT)/$$RUN_ID; \
+	echo "SELF_EDIT_RUN_ID=$$RUN_ID"; \
+	$(COMPOSE) exec -T $(SERVICE) python src/scripts/generate_self_edits.py \
+		--mode generate \
 		--input-jsonl data/datasets/train.jsonl \
-		--output-jsonl data/datasets/self_edits.jsonl \
-		--report-json data/datasets/self_edits.report.json
+		--output-dir $$OUTPUT_DIR \
+		--export-accepted $(SELF_EDITS_EXPORT_ACCEPTED) \
+		--max-sources $(SELF_EDITS_MAX_SOURCES) \
+		--candidates-per-source $(SELF_EDITS_CANDIDATES_PER_SOURCE) \
+		--seed $(SELF_EDITS_SEED); \
+	$(COMPOSE) exec -T $(SERVICE) python src/scripts/generate_self_edits.py \
+		--mode validate \
+		--input-jsonl data/datasets/train.jsonl \
+		--output-dir $$OUTPUT_DIR \
+		--export-accepted $(SELF_EDITS_EXPORT_ACCEPTED); \
+	echo "$$RUN_ID" > $(RUN_STATE_DIR)/LATEST_SELF_EDIT_RUN_ID; \
+	echo "OK: self-edits-generate completed run_id=$$RUN_ID"
+
+self-edits-validate: up
+	@set -e; \
+	if [ -z "$(SELF_EDITS_VALIDATE_RUN_ID)" ]; then \
+		if [ -f $(RUN_STATE_DIR)/LATEST_SELF_EDIT_RUN_ID ]; then \
+			RUN_ID=$$(cat $(RUN_STATE_DIR)/LATEST_SELF_EDIT_RUN_ID); \
+		else \
+			echo "ERROR: no run id specified. Set SELF_EDITS_VALIDATE_RUN_ID=<run_id> or run make self-edits-generate first."; \
+			exit 1; \
+		fi; \
+	else \
+		RUN_ID="$(SELF_EDITS_VALIDATE_RUN_ID)"; \
+	fi; \
+	OUTPUT_DIR=$(SELF_EDITS_RUNS_ROOT)/$$RUN_ID; \
+	echo "SELF_EDIT_VALIDATE_RUN_ID=$$RUN_ID"; \
+	$(COMPOSE) exec -T $(SERVICE) python src/scripts/generate_self_edits.py \
+		--mode validate \
+		--input-jsonl data/datasets/train.jsonl \
+		--output-dir $$OUTPUT_DIR \
+		--export-accepted $(SELF_EDITS_EXPORT_ACCEPTED)
 
 tensorboard: up
 	@$(COMPOSE) exec $(SERVICE) tensorboard --logdir data/logs --host 0.0.0.0 --port 6006

@@ -1,5 +1,5 @@
 Datum: 2026-04-11
-Status: Proposed (nach Umsetzung → Accepted)
+Status: Accepted
 Entscheider: Maintainer llm-homelab-training
 Geltungsbereich: llm-homelab-training (Training-Pipeline, Datasets, Audit)
 Betroffene Artefakte: src/scripts/generate_self_edits.py, Makefile, data/-Layout, ggf. src/datasets/schemas/*, .ai/*
@@ -94,6 +94,41 @@ alle Run-Artefakte + Manifest existieren
 data/training/derived/self_edits.accepted.jsonl ist valide JSONL
 Accepted Samples enthalten Provenance (candidate_id, source_sample_id, verification refs)
 deterministisch: identische Inputs/Parameter → stabiler Output (bis auf run_id/timestamps)
+
+5.1 Umsetzungsstand (2026-04-11) — Ergebnis
+Die in dieser ADR definierten MVP-Entscheidungen wurden umgesetzt.
+
+Implementiert:
+- `src/scripts/generate_self_edits.py` als Orchestrator mit Modi:
+  - `--mode placeholder` (bestehender Pfad bleibt kompatibel)
+  - `--mode generate` (deterministischer SEAL-MVP-Loop)
+  - `--mode validate` (fail-fast Artefakt-/JSONL-Validierung)
+- Regelbasierter Verifier mit Entscheidungen:
+  - `accept | reject | needs_review`
+  - Checks: Pflichtfelder/Schema-Basis, No-op/Diff, einfache Policy-Heuristiken
+- Verbindliche Artefaktpfade pro Run:
+  - `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+  - `data/self_edits/runs/<run_id>/candidates.jsonl`
+  - `data/self_edits/runs/<run_id>/verifications.jsonl`
+  - `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+  - `data/self_edits/runs/<run_id>/manifest.json`
+- Stabiler Exportpfad:
+  - `data/training/derived/self_edits.accepted.jsonl`
+- Makefile-Integration:
+  - `make self-edits-generate`
+  - `make self-edits-validate`
+  - `make self-edits` als kompatibler Alias auf `self-edits-generate`
+
+Verifiziert:
+- `make self-edits-generate` läuft grün und schreibt Run-Artefakte + Export.
+- `make self-edits-validate` validiert Artefakte und Export-JSONL.
+- Accepted-Samples enthalten Provenance (`run_id`, `source_sample_id`, `candidate_id`, `verification_id`, `strategy`, `verdict`).
+
+Nicht Bestandteil dieser Umsetzung:
+- LLM-Judge
+- Human-Review-Queue
+- Trainings-Merge-Weighting/Caps für Derived Samples
+
 6. Alternativen (bewertet)
 A) LLM-Judge im MVP
 Verworfen (zu viel Nicht-Determinismus, zusätzliche Abhängigkeit/Fehlerfläche, schwer auditierbar).

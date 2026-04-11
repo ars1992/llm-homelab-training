@@ -224,6 +224,33 @@ Hinweis zu Continue-Priorität und Stabilitäts-Gates:
 - Nachweis:
   - Mit 10 `val-rb-*` Fällen und `25` Varianten werden deterministisch `250` Samples erzeugt.
 
+### SEAL-MVP Self-Edit Pipeline (umgesetzt)
+- Status:
+  - ADR-0003 ist umgesetzt und als **Accepted** geführt.
+- Orchestrator:
+  - `src/scripts/generate_self_edits.py` unterstützt:
+    - `--mode placeholder` (legacy-kompatibel)
+    - `--mode generate` (deterministischer SEAL-MVP-Loop)
+    - `--mode validate` (fail-fast Artefakt-/JSONL-Validierung)
+- Verbindliche Run-Artefakte:
+  - `data/self_edits/runs/<run_id>/sources.snapshot.jsonl`
+  - `data/self_edits/runs/<run_id>/candidates.jsonl`
+  - `data/self_edits/runs/<run_id>/verifications.jsonl`
+  - `data/self_edits/runs/<run_id>/accepted.derived.jsonl`
+  - `data/self_edits/runs/<run_id>/manifest.json`
+- Stabiler Exportpfad:
+  - `data/training/derived/self_edits.accepted.jsonl`
+- Deterministische Verifikation (MVP):
+  - Entscheidungen: `accept | reject | needs_review`
+  - Checks: Pflichtfelder/Schema-Basis, No-op/Diff, einfache Policy-Heuristiken (u. a. Secrets-/Hostpfad-Signale)
+- Betriebsnachweis:
+  - `make self-edits-generate` läuft grün (inkl. direkter Validate-Phase)
+  - `make self-edits-validate` validiert Artefakte über `LATEST_SELF_EDIT_RUN_ID` oder explizite Run-ID
+  - Provenance in Accepted-Samples vorhanden (`run_id`, `source_sample_id`, `candidate_id`, `verification_id`, `strategy`, `verdict`)
+- Aktueller Referenzlauf:
+  - `self-edit-20260411T102943Z`
+  - Validierungsstatus: `result=ok`
+
 ### Exact-Eval-Diagnostik (Regression)
 - Beobachtetes Muster im alten Report:
   - Einzelfälle mit `fail_reason=exact_mismatch`, obwohl `exact_candidate` visuell dem erwarteten Wert entsprach.
@@ -245,6 +272,9 @@ Hinweis zu Continue-Priorität und Stabilitäts-Gates:
 - Letzter fachlich freigegebener Adapter Pointer: `data/runs/LATEST_OK_ADAPTER_ID`
 - Optional abgeleiteter Adapter-Pfad: `data/runs/LATEST_OK_ADAPTER_PATH`
 - Letzte Promotionsentscheidung: `data/runs/LATEST_PROMOTION_SUMMARY.json`
+- Letzter Self-Edit-Run Pointer: `data/runs/LATEST_SELF_EDIT_RUN_ID`
+- Self-Edit Run-Artefakte: `data/self_edits/runs/<run_id>/`
+- Exportierte Derived Samples: `data/training/derived/self_edits.accepted.jsonl`
 
 ## Hinweise zu K80
 - Kleine Batchgrößen verwenden
@@ -392,6 +422,12 @@ Nach jedem Real-Run dokumentieren:
 - `make serve-health`
 - `make serve-reload`
 - `make serve-test`
+
+### Self-Edit-Make-Targets
+- `make self-edits` (Alias auf `self-edits-generate`)
+- `make self-edits-generate`
+- `make self-edits-validate`  
+  (optional mit `SELF_EDITS_VALIDATE_RUN_ID=<run_id>`)
 
 ### OpenClaw-Anbindung
 - OpenClaw spricht den Serving-Service über die OpenAI-kompatible API an.
