@@ -304,6 +304,24 @@ Ziel ist, über mehrere Sessions konsistent, schneller und auditierbar zu arbeit
       - Run `self-edit-20260411T102943Z` wurde erfolgreich generiert und validiert (`result=ok`).
     - Betriebsprinzip bestätigt:
       - Self-Edit-Derived-Daten bleiben strikt getrennt von Source-Daten und werden nur über den dedizierten Exportpfad weiterverwendet.
+    - Self-Edits in Nightly-Run integriert:
+      - `make self-edits-generate` wird jetzt automatisch vor `prepare-dataset-augmented` ausgeführt.
+      - Steuerung über `configs/nightly.yaml` → `self_edits.generate_in_nightly: true/false`.
+      - Damit sind Self-Edit-Derived-Samples in jedem Nightly-Lauf aktuell, ohne manuellen Eingriff.
+      - Ablaufreihenfolge (final):
+        1. preflight
+        2. validate-val
+        3. self-edits-generate (wenn generate_in_nightly=true)
+        4. prepare-dataset-augmented
+        5. train (continue/short)
+        6. eval-val
+        7. promote-latest-ok
+        8. serve restart (bei Promotion)
+        9. retention-clean
+    - Zentralisierung aller Nightly-Parameter in configs/nightly.yaml abgeschlossen:
+      - Kein Betriebsparameter mehr hart im Makefile.
+      - Hilfsskript `scripts/cfg.py` liest YAML-Werte per Punkt-Pfad deterministisch aus.
+      - Alle Schwellwerte, Flags und Steuerparameter jetzt in einer Datei sichtbar und dokumentiert.
   - Dokumentationssynchronisation (README/docs/.ai) abgeschlossen:
     - Alle zentralen Betriebsdokumente wurden auf den aktuellen Implementierungsstand harmonisiert.
     - Aktualisiert wurden insbesondere:

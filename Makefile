@@ -693,13 +693,14 @@ serve-test:
 # 1) preflight
 # 2) lock-status
 # 3) validate-val
-# 4) prepare-dataset-augmented
-# 5) continue from LATEST_OK, else fresh short run
-# 6) eval-val
-# 7) promote-latest-ok
-# 8) restart serve only if promoted
-# 9) retention-clean
-nightly-run: preflight validate-val prepare-dataset-augmented check-single-flight
+# 4) self-edits-generate (wenn self_edits.generate_in_nightly=true in configs/nightly.yaml)
+# 5) prepare-dataset-augmented
+# 6) continue from LATEST_OK, else fresh short run
+# 7) eval-val
+# 8) promote-latest-ok
+# 9) restart serve only if promoted
+# 10) retention-clean
+nightly-run: preflight validate-val check-single-flight
 	@echo "##############"
 	@echo "### STEP nightly-run: full automated pipeline"
 	@echo "##############"
@@ -707,6 +708,14 @@ nightly-run: preflight validate-val prepare-dataset-augmented check-single-fligh
 	@set -e; \
 	$(MAKE) lock-status; \
 	$(MAKE) swap-gate-eval; \
+	SELF_EDITS_NIGHTLY=$$(python3 scripts/cfg.py $(NIGHTLY_CONFIG) self_edits.generate_in_nightly); \
+	if [ "$$SELF_EDITS_NIGHTLY" = "True" ] || [ "$$SELF_EDITS_NIGHTLY" = "true" ] || [ "$$SELF_EDITS_NIGHTLY" = "1" ]; then \
+		echo "INFO: nightly-run self-edits-generate (self_edits.generate_in_nightly=true)"; \
+		$(MAKE) self-edits-generate; \
+	else \
+		echo "INFO: nightly-run self-edits-generate uebersprungen (self_edits.generate_in_nightly=false)"; \
+	fi; \
+	$(MAKE) prepare-dataset-augmented; \
 	if [ "$(NIGHTLY_APPLY_CPU_LIMIT)" = "1" ]; then \
 		$(MAKE) limit-cpu; \
 	else \

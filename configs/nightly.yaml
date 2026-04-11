@@ -1,41 +1,83 @@
 # Zentrale Nightly-Konfiguration fuer llm-homelab-training
-# Zweck: alle Nightly-relevanten Schwellwerte/Parameter aus dem Makefile herausziehen.
+# Zweck: alle Nightly-relevanten Schwellwerte und Parameter zentral steuern.
+# Keine Betriebsparameter mehr im Makefile.
+#
+# Kommentarlogik:
+# - "Zweck":      Warum der Parameter existiert
+# - "Auswirkung": Was eine Aenderung konkret bewirkt
 
 promotion:
-  # Mindest-Sollwert fuer exact_openbook pass rate.
-  pass_rate_exact_openbook_min: 0.60
+    # Mindest-Passrate fuer exact_openbook Cases.
+    # Zweck:      Gate vor Promotion neuer Adapter.
+    # Auswirkung: Hoeher = strenger, weniger Promotions; niedriger = mehr Promotions, geringere Qualitaetsgarantie.
+    pass_rate_exact_openbook_min: 0.60
 
-  # Mindest-Sollwert fuer runbook_openbook durchschnittliche Coverage.
-  avg_coverage_runbook_openbook_min: 0.30
+    # Mindest-Abdeckung fuer runbook_openbook Cases (Coverage-Durchschnitt).
+    # Zweck:      Sicherstellt, dass Runbook-Ausgaben die erwarteten Tokens ausreichend enthalten.
+    # Auswirkung: 0.30 = 30% der expected_contains muessen im Durchschnitt enthalten sein.
+    avg_coverage_runbook_openbook_min: 0.0030
 
 nightly:
-  # Optionales CPU-Limit fuer Nightly-Lauf (0=aus, 1=an).
-  apply_cpu_limit: 0
+    # Optionales CPU-Limit fuer den Nightly-Lauf (0 = aus, 1 = an).
+    # Zweck:      Host-Belastung durch Training begrenzen.
+    # Auswirkung: 1 aktiviert docker CPU-Cap (cpus=6); 0 = kein Limit.
+    apply_cpu_limit: 0
 
 retention:
-  # Anzahl Run-Ordner, die mindestens behalten werden.
-  keep: 3
+    # Anzahl Run-Ordner, die mindestens behalten werden.
+    # Zweck:      Speicherplatz kontrollieren ohne wichtige Runs zu loeschen.
+    # Auswirkung: Hoeher = mehr Historisierung, mehr Platzbedarf.
+    keep: 3
 
 swap_gate:
-  # Mindestwert fuer SwapFree in kB vor schweren Schritten.
-  swapfree_min_kb: 524288
+    # Mindestwert fuer freien Swap in kB vor schweren Schritten.
+    # Zweck:      Verhindert OOM/Swap-Thrash bei knapper Speicherlage.
+    # Auswirkung: Hoeher = konservativer (laeuft seltener), niedriger = laeuft oefter durch.
+    swapfree_min_kb: 524288
 
-  # Mindestwert fuer MemAvailable in kB vor schweren Schritten.
-  mem_min_kb: 2000000
+    # Mindestwert fuer verfuegbaren RAM in kB vor schweren Schritten.
+    # Zweck:      Sicherstellt genug freien RAM vor Training/Eval.
+    # Auswirkung: Hoeher = konservativer, niedriger = mehr Risiko fuer OOM.
+    mem_min_kb: 2000000
 
 self_edits:
-  # Aktiviert Merge der self-edit exports in prepare-dataset-augmented (0=aus, 1=an).
-  merge_enable: 1
+    # Fuehrt make self-edits-generate automatisch vor prepare-dataset-augmented aus.
+    # Zweck:      Stellt sicher, dass Self-Edit-Derived-Samples in jedem Nightly-Lauf aktuell sind.
+    # Auswirkung: true = frischer Self-Edit-Run pro Nightly; false = letzter manueller Stand.
+    generate_in_nightly: true
 
-  # Obergrenze der self-edit Samples pro Mergelauf.
-  merge_cap: 200
+    # Aktiviert den Merge der Self-Edit-Exports in prepare-dataset-augmented.
+    # Zweck:      Schalter, um Self-Edits aus dem Merge komplett auszuschliessen.
+    # Auswirkung: 0 = Self-Edits werden ignoriert; 1 = werden bis merge_cap eingemischt.
+    merge_enable: 1
 
-  # Parameter fuer make self-edits-generate.
-  max_sources: 50
-  candidates_per_source: 1
-  seed: 1337
+    # Maximale Anzahl Self-Edit-Samples im Merge.
+    # Zweck:      Verhindert Uebergewicht von Self-Edit-Daten im Trainingsdatensatz.
+    # Auswirkung: Hoeher = mehr Self-Edit-Einfluss; niedriger = geringerer Anteil.
+    merge_cap: 200
+
+    # Anzahl Quell-Samples fuer Self-Edit-Generierung.
+    # Zweck:      Begrenzt Laufzeit und Artefaktgroesse pro Self-Edit-Run.
+    # Auswirkung: Hoeher = mehr Kandidaten, laengere Laufzeit.
+    max_sources: 50
+
+    # Anzahl Kandidaten pro Quell-Sample.
+    # Zweck:      Steuert Variationsbreite der Self-Edit-Vorschlaege.
+    # Auswirkung: >1 ergibt mehr Kandidaten, aber auch mehr reject-Kandidaten moeglich.
+    candidates_per_source: 1
+
+    # Seed fuer deterministische Self-Edit-Generierung.
+    # Zweck:      Reproduzierbarkeit bei gleichen Inputs.
+    # Auswirkung: Gleicher Seed + gleiche Inputs = identische Kandidaten.
+    seed: 1337
 
 runbook:
-  # Parameter fuer make runbook-samples-generate.
-  variants_per_case: 25
-  seed: 1337
+    # Anzahl Varianten pro val-rb-* Case.
+    # Zweck:      Trainingsabdeckung fuer Runbook-Cases erhoehen.
+    # Auswirkung: Hoeher = mehr Samples, bessere Coverage-Chance, laengere Generierung.
+    variants_per_case: 25
+
+    # Seed fuer deterministsiche Runbook-Generierung.
+    # Zweck:      Gleicher Seed + gleiche val.jsonl = byte-identische runbook_samples.jsonl.
+    # Auswirkung: Aenderung des Seeds = andere Varianten-Texte.
+    seed: 1337
